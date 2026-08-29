@@ -6,7 +6,7 @@ import api from "./axios";
 
 
 
-// ================= GET APPROVED DOCTORS =================
+
 
 export const getDoctors = async (page = 1, speciality = "") => {
 
@@ -27,7 +27,7 @@ export const getDoctors = async (page = 1, speciality = "") => {
 
 
 
-// ================= GET USER =================
+
 
 export const getUser = async () => {
 
@@ -40,7 +40,6 @@ export const getUser = async () => {
 };
 
 
-// ================= GET DOCTOR PROFILE =================
 
 export const getDoctorProfile = async () => {
 
@@ -53,7 +52,6 @@ export const getDoctorProfile = async () => {
 };
 
 
-// ================= UPDATE DOCTOR PROFILE =================
 
 export const updateDoctorProfile = async (doctorData) => {
 
@@ -67,7 +65,6 @@ export const updateDoctorProfile = async (doctorData) => {
 };
 
 
-// ================= UPLOAD DEGREE =================
 
 export const uploadDegreeImage = async (file) => {
 

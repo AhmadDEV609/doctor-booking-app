@@ -21,7 +21,7 @@ const Chatbot = () => {
         },
     ]);
 
-    // Auto scroll to bottom when new message arrives
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
@@ -36,13 +36,12 @@ const Chatbot = () => {
         return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     };
 
-    // Robust Recursive Helper to safely extract clean string from Strings, Objects, Arrays, or LangChain/Gemini content blocks
     const safeStringify = (val) => {
         if (typeof val === "string") return val;
         if (typeof val === "number" || typeof val === "boolean") return String(val);
 
         if (val !== null && typeof val === "object") {
-            // Case 1: Array of responses/blocks (e.g. LangChain response: [{ type: "text", text: "..." }])
+
             if (Array.isArray(val)) {
                 const extractedTexts = val
                     .map((item) => safeStringify(item))
@@ -50,19 +49,19 @@ const Chatbot = () => {
                 return extractedTexts.join("\n\n");
             }
 
-            // Case 2: Object with known text properties
+
             if (val.text && typeof val.text === "string") return val.text;
             if (val.message && typeof val.message === "string") return val.message;
             if (val.response && typeof val.response === "string") return val.response;
             if (val.content && typeof val.content === "string") return val.content;
             if (val.output && typeof val.output === "string") return val.output;
 
-            // Nested content object recursion
+
             if (val.content && typeof val.content === "object") {
                 return safeStringify(val.content);
             }
 
-            // Fallback for unknown object structure
+
             try {
                 return JSON.stringify(val, null, 2);
             } catch {
@@ -103,7 +102,7 @@ const Chatbot = () => {
 
             const data = await response.json();
 
-            // Extract raw response from common keys or root object
+
             let rawResponse = data.response ?? data.message ?? data.answer ?? data.output ?? data;
             let formattedText = safeStringify(rawResponse);
 

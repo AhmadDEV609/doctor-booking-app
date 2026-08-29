@@ -150,7 +150,7 @@ const userimageUpdate = asyncHandler(async (req, res, next) => {
     )
     fs.unlinkSync(image.path)
 
-    const destroy = await cloudinary.uploader.destroy(user.image)
+    await cloudinary.uploader.destroy(user.image)
 
     const update = await User.findByIdAndUpdate(
         { _id: req.user.id },
@@ -199,6 +199,10 @@ const doctorupdateProfile = asyncHandler(async (req, res, next) => {
             },
             { new: true, upsert: true }
         )
+        res.status(200).json({
+            message: 'doctor profile updated successfully',
+            updateData
+        })
 
 
     } else {
@@ -206,10 +210,6 @@ const doctorupdateProfile = asyncHandler(async (req, res, next) => {
         err.status = 400
         return next(err)
     }
-
-    res.status(200).json({
-        message: 'doctor profile updated successfully',
-    })
 
 
 })

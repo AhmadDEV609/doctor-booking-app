@@ -5,13 +5,14 @@ import {
 
 } from "../controllers/admin.controller.js";
 import { auth } from "../middlewares/auth.middleware.js";
-
+import roleCheck from "../middlewares/rolecheck.middleware.js";
 const adminRoutes = Router();
 
 
 adminRoutes.get(
     "/doctors",
     auth,
+    roleCheck,
     getDoctors
 );
 
@@ -19,6 +20,7 @@ adminRoutes.get(
 adminRoutes.patch(
     "/doctors/:doctorId/status",
     auth,
+    roleCheck,
     updateStatus
 );
 

@@ -33,11 +33,6 @@ const Doctor = () => {
 
         <div className="min-h-screen bg-slate-50">
 
-
-            {/* =====================================================
-                HERO / WELCOME SECTION
-            ===================================================== */}
-
             <section className="relative overflow-hidden bg-linear-to-br from-emerald-50 via-white to-cyan-50">
 
                 {/* Decorative circles */}
@@ -129,16 +124,12 @@ const Doctor = () => {
             </section>
 
 
-            {/* =====================================================
-                MAIN CONTENT
-            ===================================================== */}
+
 
             <main className="max-w-7xl mx-auto px-6 lg:px-10 py-10">
 
 
-                {/* =================================================
-                    APPROVAL STATUS
-                ================================================= */}
+
 
                 <div className="mb-8">
 
@@ -205,9 +196,6 @@ const Doctor = () => {
                 </div>
 
 
-                {/* =================================================
-                    QUICK STATS
-                ================================================= */}
 
                 <section>
 

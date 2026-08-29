@@ -13,9 +13,7 @@ from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 from pymongo import MongoClient
 
-# ---------------------------------------------------------
-# 1. FastAPI Setup & Environment
-# ---------------------------------------------------------
+
 app = FastAPI(
     title="AI Medical Assistant API",
     description="RAG + MongoDB Tooling Assistant API"
@@ -38,10 +36,8 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 client = MongoClient(MONGODB_URI)
 db = client["test"]
 
-# ---------------------------------------------------------
-# 2. PDF & Vector DB Setup
-# ---------------------------------------------------------
-document = PyPDFLoader("backend/AI medical assistant python/data/data.pdf").load()
+
+document = PyPDFLoader("AI medical assistant python/data/data.pdf").load()
 
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
@@ -72,9 +68,7 @@ def format_docs(docs):
         for doc in docs
     )
 
-# ---------------------------------------------------------
-# 3. Prompt Template
-# ---------------------------------------------------------
+
 prompt_template = """
 Instructions:
 
@@ -119,9 +113,7 @@ Question:
 
 prompt = ChatPromptTemplate.from_template(prompt_template)
 
-# ---------------------------------------------------------
-# 4. Tools & LLM Setup
-# ---------------------------------------------------------
+
 @tool
 def search_doctors(specialty: str = "", city: str = "") -> str:
     """
@@ -131,12 +123,12 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
     """
     query = {}
 
-    # Cleaning search terms
+   
     spec_clean = specialty.strip() if specialty else ""
     city_clean = city.strip() if city else ""
 
     if spec_clean:
-        # Check both 'specialty' and 'speciality' spelling in MongoDB schema
+      
         query["$or"] = [
             {"specialty": {"$regex": spec_clean, "$options": "i"}},
             {"speciality": {"$regex": spec_clean, "$options": "i"}}
@@ -145,10 +137,10 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
     if city_clean:
         query["city"] = {"$regex": city_clean, "$options": "i"}
 
-    # Fetch results from DB
+   
     results = list(db["doctors"].find(query, {"_id": 0}))
 
-    # Fallback: Agar "ENT" search karne se na mile, toh poori doctors list fetch karke check karlein
+   
     if not results and spec_clean:
         all_docs = list(db["doctors"].find({}, {"_id": 0}))
         if all_docs:
@@ -170,9 +162,7 @@ llm_with_tools = llm.bind_tools(
     [search_doctors]
 )
 
-# ---------------------------------------------------------
-# 5. Core AI Assistant Function
-# ---------------------------------------------------------
+
 def ask_medical_assistant(query):
 
     docs = retriever.invoke(query)
@@ -217,9 +207,7 @@ Instructions for Response:
     return response.content
 
 
-# ---------------------------------------------------------
-# 6. API Endpoint
-# ---------------------------------------------------------
+
 @app.post("/api/chat")
 def chat_endpoint(request: QueryRequest):
     ai_response = ask_medical_assistant(request.query)

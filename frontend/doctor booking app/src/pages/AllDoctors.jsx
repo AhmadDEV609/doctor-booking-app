@@ -185,19 +185,14 @@ const AllDoctors = () => {
     };
 
 
-    // =====================================================
     // PAGE NUMBERS
-    // =====================================================
+
 
     const pageNumbers = useMemo(() => {
 
         const pages = [];
 
-        for (
-            let i = 1;
-            i <= pagination.totalPages;
-            i++
-        ) {
+        for (let i = 1; i <= pagination.totalPages; i++) {
 
             pages.push(i);
 
@@ -208,9 +203,9 @@ const AllDoctors = () => {
     }, [pagination.totalPages]);
 
 
-    // =====================================================
+
     // RENDER
-    // =====================================================
+
 
     return (
 
@@ -793,9 +788,7 @@ const AllDoctors = () => {
                                         type="button"
                                         key={number}
                                         onClick={() => {
-
                                             setPage(number);
-
                                             window.scrollTo({
                                                 top: 0,
                                                 behavior: "smooth",

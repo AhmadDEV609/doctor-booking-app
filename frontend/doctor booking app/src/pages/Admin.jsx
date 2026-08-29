@@ -19,7 +19,7 @@ const Admin = () => {
     return (
         <div className="min-h-screen bg-slate-50">
 
-            {/* ================= HERO SECTION ================= */}
+
 
             <section className="relative overflow-hidden">
 
@@ -357,7 +357,7 @@ const Admin = () => {
             </section>
 
 
-            {/* ================= ADMIN INFO ================= */}
+
 
             <section className="max-w-7xl mx-auto px-5 sm:px-8 lg:px-10 pb-16">
 

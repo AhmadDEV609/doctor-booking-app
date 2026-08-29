@@ -17,18 +17,13 @@ import { useNavigate } from "react-router-dom";
 import api from "../api/axios";
 
 
-// =====================================================
-// APPOINTMENTS COMPONENT
-// =====================================================
+
 
 const Appointments = () => {
 
     const navigate = useNavigate();
 
 
-    // =====================================================
-    // STATES
-    // =====================================================
 
     const [appointments, setAppointments] = useState([]);
 
@@ -37,9 +32,7 @@ const Appointments = () => {
     const [error, setError] = useState("");
 
 
-    // =====================================================
-    // GET USER APPOINTMENTS
-    // =====================================================
+
 
     useEffect(() => {
 
@@ -90,9 +83,7 @@ const Appointments = () => {
     }, []);
 
 
-    // =====================================================
-    // LOADING
-    // =====================================================
+
 
     if (loading) {
 

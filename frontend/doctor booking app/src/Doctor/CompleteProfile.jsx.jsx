@@ -278,15 +278,7 @@ const CompleteProfile = () => {
         }
 
         setForm((prev) => ({
-
-            ...prev,
-
-            availability: [
-                ...prev.availability,
-                {
-                    ...newSlot
-                }
-            ]
+            ...prev, availability: [...prev.availability, { ...newSlot }]
 
         }));
 
@@ -310,13 +302,7 @@ const CompleteProfile = () => {
     const removeAvailability = (index) => {
 
         setForm((prev) => ({
-
-            ...prev,
-
-            availability:
-                prev.availability.filter(
-                    (_, i) => i !== index
-                )
+            ...prev, availability: prev.availability.filter((_, i) => i !== index)
 
         }));
 
