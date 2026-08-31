@@ -37,7 +37,7 @@ client = MongoClient(MONGODB_URI)
 db = client["test"]
 
 
-document = PyPDFLoader("AI medical assistant python/data/data.pdf").load()
+document = PyPDFLoader("data/data.pdf").load()
 
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=500,
