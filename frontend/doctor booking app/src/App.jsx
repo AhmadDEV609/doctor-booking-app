@@ -13,7 +13,7 @@ import Admin from "./pages/Admin";
 import PatientProtected from "./pages/PatientProtected";
 import DoctorProtected from "./pages/DoctorProtected";
 import AdminProtected from "./pages/AdminProtected";
-import Alldoctors from "./pages/Alldoctors";
+import Alldoctors from "./pages/AllDoctors";
 import Appointments from "./pages/Appointments";
 import CompleteProfile from "./Doctor/CompleteProfile.jsx";
 import AdminDoctors from "./Admin/AdminDoctors.jsx";
