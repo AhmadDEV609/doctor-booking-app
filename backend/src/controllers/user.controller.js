@@ -1,7 +1,6 @@
 import User from "../models/user.model.js";
 import asyncHandler from "../utils/asynHandler.js";
 import bcrypt from 'bcrypt'
-import jwt from 'jsonwebtoken'
 import generateTokens from "../helper/generateTokens.helper.js";
 import Doctor from "../models/doctor.model.js";
 import fs from 'fs'
