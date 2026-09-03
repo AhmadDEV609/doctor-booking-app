@@ -99,10 +99,31 @@ MEDICAL SAFETY RULES
 6. Always identify emergency warning signs when relevant.
 7. Never invent doctor information, availability, timing, or fees.
 
+SPECIALIST RECOMMENDATION RULES
+
+8. If the user describes symptoms and asks which doctor they should
+consult, do NOT diagnose the disease.
+
+9. Instead, identify the most appropriate medical specialty based on
+the symptoms.
+
+10. If a suitable specialty can be identified, use the search_doctors
+tool to find admin-approved doctors in that specialty.
+
+11. If the user provides a city, pass that city to the search_doctors tool.
+
+12. Clearly tell the user that the recommended specialty is guidance
+and not a medical diagnosis.
+
+13. If the symptoms may indicate an emergency, prioritize urgent medical
+care advice instead of recommending a normal appointment.
+
 ANSWER QUALITY
 
-8. Give answers in a professional, empathetic, and clear manner using clean Markdown formatting (bolding, bullet points).
-9. Respond in the same language as the user (English or Roman Urdu).
+14. Give answers in a professional, empathetic, and clear manner using
+clean Markdown formatting (bolding, bullet points).
+15. Respond in the same language as the user (English or Roman Urdu).
+
 
 Context:
 {context}
@@ -117,11 +138,27 @@ prompt = ChatPromptTemplate.from_template(prompt_template)
 @tool
 def search_doctors(specialty: str = "", city: str = "") -> str:
     """
-    Search the database for doctors based on specialty (e.g., 'ENT', 'Cardiologist', 'Dermatologist') or city.
-    Always use this tool when the user asks for available doctors, appointment timings, or fees.
-    City is completely optional. If city is not provided, search and return all matching doctors.
+    Search only admin-approved doctors based on specialty and/or city.
+
+    Use this tool when:
+    - The user asks for available doctors.
+    - The user asks which doctor they should consult.
+    - The user describes symptoms and needs specialist guidance.
+    - The user asks for doctors by specialty.
+    - The user asks for doctors by city.
+    - The user asks about doctor fees or timings.
+
+    If the user describes symptoms and does not mention a specialty,
+    identify the most appropriate medical specialty first, then use
+    this tool to search for approved doctors.
+
+    Never diagnose the patient.
+    Never return or recommend unapproved doctors.
+    Never invent doctor information, availability, timings, or fees.
     """
-    query = {}
+    query = {
+        "approveStatus": "approved"
+    }
 
    
     spec_clean = specialty.strip() if specialty else ""
@@ -140,12 +177,7 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
    
     results = list(db["doctors"].find(query, {"_id": 0}))
 
-   
-    if not results and spec_clean:
-        all_docs = list(db["doctors"].find({}, {"_id": 0}))
-        if all_docs:
-            return f"Found all registered doctors in system: {all_docs}"
-        return "No doctors found in the database system."
+
 
     if not results:
         return "No doctors found matching the given criteria."
@@ -186,20 +218,51 @@ def ask_medical_assistant(query):
         final_prompt = f"""
 You are a professional AI Medical Assistant.
 
-User Question: {query}
+User Question:
+{query}
 
-Database Search Results (Doctor Records):
+Database Search Results:
 {result}
 
 Medical Context:
 {context}
 
-Instructions for Response:
-1. If doctor records were found in the Database Search Results, list them clearly with all available details: Name, Specialty, Experience, City, Fee, and Available Timings. Format them with clean bullet points.
-2. If no doctor records were found, politely inform the user that no matching doctor is currently registered in the system.
-3. Keep the tone empathetic, clinical, and highly professional.
-4. Respond in the same language as the user (English or Roman Urdu).
+Instructions:
+
+1. If the user described symptoms, DO NOT diagnose the patient.
+
+2. If a medical specialty was identified from the symptoms, clearly
+explain that this specialty may be appropriate to consult.
+
+3. Clearly state that the recommendation is not a medical diagnosis.
+
+4. If approved doctors were found in the database, list them clearly
+using only the information returned by the database.
+
+5. For each doctor, show available information such as:
+   - Name
+   - Specialty
+   - Experience
+   - City
+   - Consultation Fee
+   - Available Timings
+
+6. NEVER invent doctor information, fees, timings, availability,
+experience, or qualifications.
+
+7. Only recommend doctors that appear in the database search results.
+
+8. If no approved doctors were found, tell the user that no matching
+approved doctor is currently available in the system.
+
+9. If the user's symptoms may indicate an emergency, prioritize urgent
+medical care advice instead of normal doctor recommendations.
+
+10. Respond in the same language as the user: English or Roman Urdu.
+
+11. Keep the response professional, empathetic, clear, and concise.
 """
+
 
         final_response = llm.invoke(final_prompt)
         return final_response.content
