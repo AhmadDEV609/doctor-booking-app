@@ -4,8 +4,8 @@ python-dotenv
 pydantic
 pymongo
 pypdf
-chromadb
 langchain-google-genai
 langchain-community
 langchain-text-splitters
 langchain-core
+langchain-mongodb

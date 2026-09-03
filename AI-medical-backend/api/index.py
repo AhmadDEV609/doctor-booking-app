@@ -1,8 +1,6 @@
 import os
-from pathlib import Path
 
 from dotenv import load_dotenv
-
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,25 +9,11 @@ from langchain_google_genai import (
     ChatGoogleGenerativeAI,
     GoogleGenerativeAIEmbeddings
 )
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
 from pymongo import MongoClient
-
-
-# =========================================================
-# PATHS
-# =========================================================
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-PDF_PATH = BASE_DIR / "data" / "data.pdf"
-
-# Vercel serverless environment allows temporary files in /tmp
-CHROMA_DIR = Path("/tmp/medical_chroma")
 
 
 # =========================================================
@@ -42,10 +26,14 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not MONGODB_URI:
-    raise RuntimeError("MONGODB_URI environment variable is missing.")
+    raise RuntimeError(
+        "MONGODB_URI environment variable is missing."
+    )
 
 if not GOOGLE_API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY environment variable is missing.")
+    raise RuntimeError(
+        "GOOGLE_API_KEY environment variable is missing."
+    )
 
 
 # =========================================================
@@ -83,33 +71,13 @@ client = MongoClient(MONGODB_URI)
 
 db = client["test"]
 
+medical_collection = db["medical_chunks"]
 
-# =========================================================
-# LOAD PDF
-# =========================================================
-
-if not PDF_PATH.exists():
-    raise FileNotFoundError(
-        f"Medical knowledge PDF not found: {PDF_PATH}"
-    )
-
-document = PyPDFLoader(str(PDF_PATH)).load()
+doctors_collection = db["doctors"]
 
 
 # =========================================================
-# TEXT SPLITTING
-# =========================================================
-
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,
-    chunk_overlap=50
-)
-
-documents = text_splitter.split_documents(document)
-
-
-# =========================================================
-# EMBEDDINGS
+# GEMINI EMBEDDINGS
 # =========================================================
 
 embeddings = GoogleGenerativeAIEmbeddings(
@@ -118,30 +86,57 @@ embeddings = GoogleGenerativeAIEmbeddings(
 
 
 # =========================================================
-# CHROMA VECTOR DATABASE
+# VECTOR SEARCH
 # =========================================================
 
-docsearch = Chroma.from_documents(
-    documents=documents,
-    embedding=embeddings,
-    collection_name="abc",
-    persist_directory=str(CHROMA_DIR)
-)
+def retrieve_medical_context(query: str, limit: int = 5):
 
-retriever = docsearch.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 5}
-)
+    # Create embedding for user's question
+    query_vector = embeddings.embed_query(query)
+
+    # MongoDB Atlas Vector Search pipeline
+    pipeline = [
+        {
+            "$vectorSearch": {
+                "index": "medical_vector_index",
+                "path": "embedding",
+                "queryVector": query_vector,
+                "numCandidates": 50,
+                "limit": limit
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "text": 1,
+                "metadata": 1,
+                "score": {
+                    "$meta": "vectorSearchScore"
+                }
+            }
+        }
+    ]
+
+    results = list(
+        medical_collection.aggregate(pipeline)
+    )
+
+    return results
 
 
 # =========================================================
-# FORMAT DOCUMENTS
+# FORMAT MEDICAL DOCUMENTS
 # =========================================================
 
-def format_docs(docs):
+def format_medical_context(results):
+
+    if not results:
+        return ""
+
     return "\n\n".join(
-        doc.page_content
-        for doc in docs
+        result["text"]
+        for result in results
+        if result.get("text")
     )
 
 
@@ -153,6 +148,7 @@ prompt_template = """
 Instructions:
 
 You are a professional AI Medical Assistant.
+
 Your role is to provide clear, accurate, safe, and clinically responsible health information.
 
 KNOWLEDGE AND CONTEXT RULES
@@ -169,7 +165,9 @@ KNOWLEDGE AND CONTEXT RULES
 
 4. IF the answer is NOT available in the Context:
 - Start the response with exactly:
+
 "[Note: This information was not found in the provided medical knowledge base. The following is based on general medical knowledge and should be verified with an appropriate healthcare professional when necessary.]"
+
 - Then provide a professional, evidence-based general medical answer.
 
 MEDICAL SAFETY RULES
@@ -201,9 +199,11 @@ ANSWER QUALITY
 15. Respond in the same language as the user (English or Roman Urdu).
 
 Context:
+
 {context}
 
 Question:
+
 {question}
 """
 
@@ -218,9 +218,13 @@ prompt = ChatPromptTemplate.from_template(
 # =========================================================
 
 @tool
-def search_doctors(specialty: str = "", city: str = "") -> str:
+def search_doctors(
+    specialty: str = "",
+    city: str = ""
+) -> str:
     """
-    Search only admin-approved doctors based on specialty and/or city.
+    Search only admin-approved doctors based on
+    specialty and/or city.
     """
 
     query = {
@@ -231,6 +235,7 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
     city_clean = city.strip() if city else ""
 
     if spec_clean:
+
         query["$or"] = [
             {
                 "specialty": {
@@ -247,13 +252,14 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
         ]
 
     if city_clean:
+
         query["city"] = {
             "$regex": city_clean,
             "$options": "i"
         }
 
     results = list(
-        db["doctors"].find(
+        doctors_collection.find(
             query,
             {"_id": 0}
         )
@@ -266,13 +272,14 @@ def search_doctors(specialty: str = "", city: str = "") -> str:
 
 
 # =========================================================
-# GEMINI
+# GEMINI LLM
 # =========================================================
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0.0
 )
+
 
 llm_with_tools = llm.bind_tools(
     [search_doctors]
@@ -285,9 +292,22 @@ llm_with_tools = llm.bind_tools(
 
 def ask_medical_assistant(query):
 
-    docs = retriever.invoke(query)
+    # -----------------------------------------------------
+    # 1. RETRIEVE RELEVANT MEDICAL CHUNKS
+    # -----------------------------------------------------
 
-    context = format_docs(docs)
+    results = retrieve_medical_context(
+        query,
+        limit=5
+    )
+
+    context = format_medical_context(
+        results
+    )
+
+    # -----------------------------------------------------
+    # 2. SEND CONTEXT + QUESTION TO GEMINI
+    # -----------------------------------------------------
 
     response = llm_with_tools.invoke(
         prompt.invoke(
@@ -299,7 +319,7 @@ def ask_medical_assistant(query):
     )
 
     # -----------------------------------------------------
-    # IF DOCTOR SEARCH TOOL IS REQUIRED
+    # 3. IF DOCTOR SEARCH TOOL IS REQUIRED
     # -----------------------------------------------------
 
     if response.tool_calls:
@@ -314,25 +334,35 @@ def ask_medical_assistant(query):
 You are a professional AI Medical Assistant.
 
 User Question:
+
 {query}
 
+
 Database Search Results:
+
 {result}
 
+
 Medical Context:
+
 {context}
+
 
 Instructions:
 
 1. If the user described symptoms, DO NOT diagnose the patient.
 
-2. If a medical specialty was identified from the symptoms, clearly explain that this specialty may be appropriate to consult.
+2. If a medical specialty was identified from the symptoms,
+clearly explain that this specialty may be appropriate to consult.
 
 3. Clearly state that the recommendation is not a medical diagnosis.
 
-4. If approved doctors were found in the database, list them clearly using only the information returned by the database.
+4. If approved doctors were found in the database,
+list them clearly using only the information returned
+by the database.
 
 5. For each doctor, show available information such as:
+
 - Name
 - Specialty
 - Experience
@@ -340,17 +370,25 @@ Instructions:
 - Consultation Fee
 - Available Timings
 
-6. NEVER invent doctor information, fees, timings, availability, experience, or qualifications.
+6. NEVER invent doctor information, fees, timings,
+availability, experience, or qualifications.
 
-7. Only recommend doctors that appear in the database search results.
+7. Only recommend doctors that appear in the database
+search results.
 
-8. If no approved doctors were found, tell the user that no matching approved doctor is currently available in the system.
+8. If no approved doctors were found, tell the user that
+no matching approved doctor is currently available
+in the system.
 
-9. If the user's symptoms may indicate an emergency, prioritize urgent medical care advice instead of normal doctor recommendations.
+9. If the user's symptoms may indicate an emergency,
+prioritize urgent medical care advice instead of
+normal doctor recommendations.
 
-10. Respond in the same language as the user: English or Roman Urdu.
+10. Respond in the same language as the user:
+English or Roman Urdu.
 
-11. Keep the response professional, empathetic, clear, and concise.
+11. Keep the response professional, empathetic,
+clear, and concise.
 """
 
         final_response = llm.invoke(
@@ -358,6 +396,10 @@ Instructions:
         )
 
         return final_response.content
+
+    # -----------------------------------------------------
+    # 4. NORMAL MEDICAL RESPONSE
+    # -----------------------------------------------------
 
     return response.content
 
@@ -367,7 +409,9 @@ Instructions:
 # =========================================================
 
 @app.post("/api/chat")
-def chat_endpoint(request: QueryRequest):
+def chat_endpoint(
+    request: QueryRequest
+):
 
     ai_response = ask_medical_assistant(
         request.query
@@ -386,6 +430,7 @@ def chat_endpoint(request: QueryRequest):
 
 @app.get("/")
 def root():
+
     return {
         "status": "success",
         "message": "AI Medical Assistant API is running"
