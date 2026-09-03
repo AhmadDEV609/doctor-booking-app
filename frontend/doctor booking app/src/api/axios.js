@@ -13,7 +13,7 @@ api.interceptors.response.use(res => res, async (error) => {
 
         originalRequest._retry = true;
 
-        await api.post("/users/refresh");
+        await api.post("/users/refreshToken");
 
         return api(originalRequest);
     }
