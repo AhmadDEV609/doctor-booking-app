@@ -1,6 +1,8 @@
 import os
+import re
 
 from dotenv import load_dotenv
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,10 +27,12 @@ load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+
 if not MONGODB_URI:
     raise RuntimeError(
         "MONGODB_URI environment variable is missing."
     )
+
 
 if not GOOGLE_API_KEY:
     raise RuntimeError(
@@ -42,9 +46,14 @@ if not GOOGLE_API_KEY:
 
 app = FastAPI(
     title="AI Medical Assistant API",
-    description="RAG + MongoDB Tooling Assistant API"
+    description="RAG + MongoDB Doctor Search + Gemini Medical Assistant",
+    version="1.0.0"
 )
 
+
+# =========================================================
+# CORS
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,13 +76,18 @@ class QueryRequest(BaseModel):
 # MONGODB
 # =========================================================
 
-client = MongoClient(MONGODB_URI)
+client = MongoClient(
+    MONGODB_URI,
+    serverSelectionTimeoutMS=10000
+)
 
 db = client["test"]
 
 medical_collection = db["medical_chunks"]
 
 doctors_collection = db["doctors"]
+
+users_collection = db["users"]
 
 
 # =========================================================
@@ -86,15 +100,31 @@ embeddings = GoogleGenerativeAIEmbeddings(
 
 
 # =========================================================
-# VECTOR SEARCH
+# GEMINI LLM
 # =========================================================
 
-def retrieve_medical_context(query: str, limit: int = 5):
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    temperature=0.0
+)
 
-    # Create embedding for user's question
+
+# =========================================================
+# MEDICAL VECTOR SEARCH
+# =========================================================
+
+def retrieve_medical_context(
+    query: str,
+    limit: int = 5
+):
+    """
+    Convert the user's question into an embedding and
+    retrieve the most relevant medical document chunks
+    from MongoDB Atlas Vector Search.
+    """
+
     query_vector = embeddings.embed_query(query)
 
-    # MongoDB Atlas Vector Search pipeline
     pipeline = [
         {
             "$vectorSearch": {
@@ -118,14 +148,16 @@ def retrieve_medical_context(query: str, limit: int = 5):
     ]
 
     results = list(
-        medical_collection.aggregate(pipeline)
+        medical_collection.aggregate(
+            pipeline
+        )
     )
 
     return results
 
 
 # =========================================================
-# FORMAT MEDICAL DOCUMENTS
+# FORMAT MEDICAL CONTEXT
 # =========================================================
 
 def format_medical_context(results):
@@ -133,76 +165,359 @@ def format_medical_context(results):
     if not results:
         return ""
 
-    return "\n\n".join(
-        result["text"]
-        for result in results
-        if result.get("text")
-    )
+    context_parts = []
+
+    for result in results:
+
+        text = result.get("text")
+
+        if text:
+            context_parts.append(text)
+
+    return "\n\n".join(context_parts)
 
 
 # =========================================================
-# MEDICAL PROMPT
+# DOCTOR SEARCH TOOL
+# =========================================================
+
+@tool
+def search_doctors(
+    specialty: str = "",
+    city: str = ""
+) -> str:
+    """
+    Search admin-approved doctors.
+
+    Use this tool when the user:
+    - asks for doctors
+    - asks for approved doctors
+    - asks for doctor details
+    - asks for doctors by specialty
+    - asks for doctors by city
+    - describes symptoms and needs a suitable specialist
+
+    specialty:
+        Optional specialty filter.
+
+    city:
+        Optional city filter.
+
+    Only doctors with approveStatus='approved' are returned.
+    """
+
+    # -----------------------------------------------------
+    # BASE QUERY
+    # -----------------------------------------------------
+
+    query = {
+        "approveStatus": "approved"
+    }
+
+    # -----------------------------------------------------
+    # CLEAN INPUT
+    # -----------------------------------------------------
+
+    spec_clean = (
+        specialty.strip()
+        if specialty
+        else ""
+    )
+
+    city_clean = (
+        city.strip()
+        if city
+        else ""
+    )
+
+    # -----------------------------------------------------
+    # SPECIALTY FILTER
+    # -----------------------------------------------------
+
+    if spec_clean:
+
+        query["speciality"] = {
+            "$regex": re.escape(spec_clean),
+            "$options": "i"
+        }
+
+    # -----------------------------------------------------
+    # CITY FILTER
+    # -----------------------------------------------------
+
+    if city_clean:
+
+        query["city"] = {
+            "$regex": re.escape(city_clean),
+            "$options": "i"
+        }
+
+    # -----------------------------------------------------
+    # FIND DOCTORS
+    # -----------------------------------------------------
+
+    doctors = list(
+        doctors_collection.find(
+            query,
+            {
+                "_id": 1,
+                "userId": 1,
+                "speciality": 1,
+                "experience": 1,
+                "fee": 1,
+                "city": 1,
+                "checkDuration": 1,
+                "availability": 1
+            }
+        )
+    )
+
+    # -----------------------------------------------------
+    # NO RESULTS
+    # -----------------------------------------------------
+
+    if not doctors:
+
+        return (
+            "No approved doctors found matching "
+            "the given criteria."
+        )
+
+    # -----------------------------------------------------
+    # FORMAT DOCTORS
+    # -----------------------------------------------------
+
+    formatted_doctors = []
+
+    for doctor in doctors:
+
+        user = users_collection.find_one(
+            {
+                "_id": doctor.get("userId")
+            },
+            {
+                "_id": 0,
+                "name": 1,
+                "email": 1,
+                "phone": 1,
+                "image": 1,
+                "bio": 1,
+                "city": 1
+            }
+        )
+
+        doctor_data = {
+            "name": (
+                user.get("name")
+                if user
+                else "Doctor"
+            ),
+
+            "speciality": doctor.get(
+                "speciality"
+            ),
+
+            "experience": doctor.get(
+                "experience"
+            ),
+
+            "fee": doctor.get(
+                "fee"
+            ),
+
+            "city": doctor.get(
+                "city"
+            ),
+
+            "checkDuration": doctor.get(
+                "checkDuration"
+            ),
+
+            "availability": doctor.get(
+                "availability",
+                []
+            )
+        }
+
+        formatted_doctors.append(
+            doctor_data
+        )
+
+    return str(formatted_doctors)
+
+
+# =========================================================
+# TOOL ENABLED LLM
+# =========================================================
+
+llm_with_tools = llm.bind_tools(
+    [search_doctors]
+)
+
+
+# =========================================================
+# MEDICAL SYSTEM PROMPT
 # =========================================================
 
 prompt_template = """
-Instructions:
-
 You are a professional AI Medical Assistant.
 
-Your role is to provide clear, accurate, safe, and clinically responsible health information.
+Your role is to provide clear, accurate, safe,
+responsible and helpful health information.
 
-KNOWLEDGE AND CONTEXT RULES
+You are connected to:
 
-1. FIRST, inspect the provided Context carefully and determine whether it contains sufficient information to answer the user's question.
+1. A medical knowledge base using RAG.
+2. A MongoDB database containing doctors.
+3. A doctor search tool.
 
-2. IF the answer is fully supported by the Context:
-- Answer primarily using the information available in the Context.
-- Do not introduce unsupported medical facts as if they came from the Context.
+=========================================================
+MEDICAL KNOWLEDGE / RAG RULES
+=========================================================
 
-3. IF the Context contains only PART of the answer:
-- Use the relevant information from the Context.
-- For additional information, use general medical knowledge only when appropriate and safe.
+1. First inspect the provided medical Context.
 
-4. IF the answer is NOT available in the Context:
-- Start the response with exactly:
+2. If the Context contains sufficient information
+to answer the question, primarily use that information.
 
-"[Note: This information was not found in the provided medical knowledge base. The following is based on general medical knowledge and should be verified with an appropriate healthcare professional when necessary.]"
+3. Do not claim that information came from the medical
+knowledge base if it is not supported by the Context.
 
-- Then provide a professional, evidence-based general medical answer.
+4. If the Context contains only part of the answer,
+use the relevant Context and supplement it with
+general medical knowledge when appropriate.
 
+5. If the Context does not contain the answer,
+you may use general medical knowledge.
+
+6. When the answer is not found in the medical knowledge
+base, clearly indicate that the answer is based on
+general medical knowledge.
+
+7. Never invent medical facts.
+
+=========================================================
 MEDICAL SAFETY RULES
+=========================================================
 
-5. Never claim that a user definitely has a disease based only on symptoms.
+8. Never diagnose a patient with certainty based only
+on symptoms.
 
-6. Always identify emergency warning signs when relevant.
+9. Symptoms can have multiple possible causes.
 
-7. Never invent doctor information, availability, timing, or fees.
+10. When appropriate, explain possible causes without
+claiming a definite diagnosis.
 
-SPECIALIST RECOMMENDATION RULES
+11. Mention important emergency warning signs when
+they are relevant.
 
-8. If the user describes symptoms and asks which doctor they should consult, do NOT diagnose the disease.
+12. If symptoms suggest a potentially serious emergency,
+prioritize urgent medical attention.
 
-9. Instead, identify the most appropriate medical specialty based on the symptoms.
+13. Do not recommend delaying emergency care.
 
-10. If a suitable specialty can be identified, use the search_doctors tool to find admin-approved doctors in that specialty.
+14. Do not prescribe medication or give unsafe medication
+dosages without sufficient clinical context.
 
-11. If the user provides a city, pass that city to the search_doctors tool.
+15. Encourage consultation with a qualified healthcare
+professional when appropriate.
 
-12. Clearly tell the user that the recommended specialty is guidance and not a medical diagnosis.
+=========================================================
+DOCTOR SEARCH RULES
+=========================================================
 
-13. If the symptoms may indicate an emergency, prioritize urgent medical care advice instead of recommending a normal appointment.
+16. If the user directly asks for doctors, doctor lists,
+approved doctors, doctor details, doctors in the system,
+or doctors of a specific specialty, use the
+search_doctors tool.
 
-ANSWER QUALITY
+17. If the user asks for ALL approved doctors, use the
+search_doctors tool without a specialty or city filter.
 
-14. Give answers in a professional, empathetic, and clear manner using clean Markdown formatting (bolding, bullet points).
+18. If the user asks for a specific specialty, pass that
+specialty to the search_doctors tool.
 
-15. Respond in the same language as the user (English or Roman Urdu).
+19. If the user provides a city, pass that city to the
+search_doctors tool.
 
-Context:
+20. Only show doctors returned by the search_doctors tool.
+
+21. Never invent doctor information.
+
+22. Never invent:
+- doctor names
+- specialties
+- experience
+- fees
+- cities
+- timings
+- availability
+- qualifications
+- licenses
+
+23. The doctor database is the ONLY source of truth
+for doctor information.
+
+24. If no doctors are returned, clearly tell the user
+that no approved matching doctors were found.
+
+25. The AI must not use the isAvailable field to decide
+whether a doctor should be shown.
+
+26. Approved doctors should be shown based on
+approveStatus='approved'.
+
+27. If availability/timing information exists in the
+database's availability field, it may be shown exactly
+as returned by the database.
+
+=========================================================
+SYMPTOM → SPECIALTY RULES
+=========================================================
+
+28. If the user describes symptoms and asks which doctor
+they should consult, do NOT diagnose the disease.
+
+29. Identify the most appropriate medical specialty
+based on the symptoms.
+
+30. Clearly explain that the specialty recommendation
+is guidance and not a diagnosis.
+
+31. After identifying a suitable specialty, use the
+search_doctors tool to find approved doctors in that
+specialty.
+
+32. If the user provides a city, include the city when
+searching for doctors.
+
+33. If the symptoms may indicate an emergency, prioritize
+urgent medical care instead of a normal appointment.
+
+=========================================================
+LANGUAGE RULES
+=========================================================
+
+34. Respond in the same language used by the user.
+
+35. If the user uses English, respond in English.
+
+36. If the user uses Roman Urdu, respond in Roman Urdu.
+
+37. Keep the response professional, empathetic and easy
+to understand.
+
+38. Use clean Markdown formatting.
+
+=========================================================
+MEDICAL CONTEXT
+=========================================================
 
 {context}
 
-Question:
+=========================================================
+USER QUESTION
+=========================================================
 
 {question}
 """
@@ -214,100 +529,164 @@ prompt = ChatPromptTemplate.from_template(
 
 
 # =========================================================
-# SEARCH DOCTORS TOOL
+# DOCTOR QUERY DETECTION
 # =========================================================
 
-@tool
-def search_doctors(
-    specialty: str = "",
-    city: str = ""
-) -> str:
+def is_doctor_query(query: str) -> bool:
     """
-    Search only admin-approved doctors based on
-    specialty and/or city.
+    Detect direct doctor-related requests.
+
+    This prevents normal doctor listing/detail queries
+    from unnecessarily depending on RAG retrieval.
     """
 
-    query = {
-        "approveStatus": "approved"
-    }
+    query_lower = query.lower()
 
-    spec_clean = specialty.strip() if specialty else ""
-    city_clean = city.strip() if city else ""
+    doctor_keywords = [
+        "doctor",
+        "doctors",
+        "approved doctor",
+        "approved doctors",
+        "doctor list",
+        "doctor lists",
+        "doctor detail",
+        "doctor details",
+        "doctor information",
+        "doctor info",
+        "specialist",
+        "specialists",
+        "ent doctor",
+        "ent specialist",
+        "cardiologist",
+        "cardiology",
+        "dermatologist",
+        "dermatology",
+        "neurologist",
+        "neurology",
+        "orthopedic",
+        "orthopaedic",
+        "gynecologist",
+        "gynaecologist",
+        "pediatrician",
+        "paediatrician",
+        "psychiatrist",
+        "lahore doctor",
+        "doctors in lahore"
+    ]
 
-    if spec_clean:
-
-        query["$or"] = [
-            {
-                "specialty": {
-                    "$regex": spec_clean,
-                    "$options": "i"
-                }
-            },
-            {
-                "speciality": {
-                    "$regex": spec_clean,
-                    "$options": "i"
-                }
-            }
-        ]
-
-    if city_clean:
-
-        query["city"] = {
-            "$regex": city_clean,
-            "$options": "i"
-        }
-
-    results = list(
-        doctors_collection.find(
-            query,
-            {"_id": 0}
-        )
+    return any(
+        keyword in query_lower
+        for keyword in doctor_keywords
     )
 
-    if not results:
-        return "No doctors found matching the given criteria."
-
-    return str(results)
-
 
 # =========================================================
-# GEMINI LLM
+# FINAL DOCTOR RESPONSE
 # =========================================================
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0.0
-)
+def generate_doctor_response(
+    query: str,
+    result: str,
+    context: str = ""
+):
+    """
+    Convert raw MongoDB doctor results into a
+    professional natural-language response.
+    """
+
+    final_prompt = f"""
+You are a professional AI Medical Assistant.
+
+USER QUESTION:
+
+{query}
 
 
-llm_with_tools = llm.bind_tools(
-    [search_doctors]
-)
+DATABASE DOCTOR RESULTS:
+
+{result}
 
 
-# =========================================================
-# MEDICAL ASSISTANT
-# =========================================================
+MEDICAL CONTEXT:
 
-def ask_medical_assistant(query):
+{context}
 
-    # -----------------------------------------------------
-    # 1. RETRIEVE RELEVANT MEDICAL CHUNKS
-    # -----------------------------------------------------
 
-    results = retrieve_medical_context(
-        query,
-        limit=5
+IMPORTANT RULES:
+
+1. The database results are the ONLY source of truth
+for doctor information.
+
+2. Only mention doctors present in the database results.
+
+3. Never invent or modify doctor information.
+
+4. Never invent:
+- Name
+- Specialty
+- Experience
+- City
+- Fee
+- Timings
+- Availability
+- Qualifications
+- License
+
+5. If doctors were found, present them clearly.
+
+6. For each doctor show the information that is actually
+available in the database, such as:
+
+- Name
+- Specialty
+- Experience
+- City
+- Consultation Fee
+- Check Duration
+- Available Days
+- Available Timings
+
+7. Do not mention information that does not exist
+in the database result.
+
+8. If no doctors were found, clearly tell the user that
+no approved matching doctors were found in the system.
+
+9. If this was a symptom-based recommendation,
+do not diagnose the patient.
+
+10. Explain that the recommended specialty is guidance
+and not a medical diagnosis.
+
+11. If the symptoms indicate a possible emergency,
+prioritize urgent medical care.
+
+12. Respond in the same language as the user.
+
+13. Keep the response professional, concise and clear.
+
+14. Use Markdown formatting.
+"""
+
+    response = llm.invoke(
+        final_prompt
     )
 
-    context = format_medical_context(
-        results
-    )
+    return response.content
 
-    # -----------------------------------------------------
-    # 2. SEND CONTEXT + QUESTION TO GEMINI
-    # -----------------------------------------------------
+
+# =========================================================
+# MEDICAL RAG RESPONSE
+# =========================================================
+
+def generate_medical_response(
+    query: str,
+    context: str
+):
+    """
+    Generate a normal medical response using
+    retrieved RAG context and optional doctor tool.
+    """
 
     response = llm_with_tools.invoke(
         prompt.invoke(
@@ -319,93 +698,113 @@ def ask_medical_assistant(query):
     )
 
     # -----------------------------------------------------
-    # 3. IF DOCTOR SEARCH TOOL IS REQUIRED
+    # TOOL CALL
     # -----------------------------------------------------
 
     if response.tool_calls:
 
         tool_call = response.tool_calls[0]
 
+        tool_args = tool_call.get(
+            "args",
+            {}
+        )
+
         result = search_doctors.invoke(
-            tool_call["args"]
+            tool_args
         )
 
-        final_prompt = f"""
-You are a professional AI Medical Assistant.
-
-User Question:
-
-{query}
-
-
-Database Search Results:
-
-{result}
-
-
-Medical Context:
-
-{context}
-
-
-Instructions:
-
-1. If the user described symptoms, DO NOT diagnose the patient.
-
-2. If a medical specialty was identified from the symptoms,
-clearly explain that this specialty may be appropriate to consult.
-
-3. Clearly state that the recommendation is not a medical diagnosis.
-
-4. If approved doctors were found in the database,
-list them clearly using only the information returned
-by the database.
-
-5. For each doctor, show available information such as:
-
-- Name
-- Specialty
-- Experience
-- City
-- Consultation Fee
-- Available Timings
-
-6. NEVER invent doctor information, fees, timings,
-availability, experience, or qualifications.
-
-7. Only recommend doctors that appear in the database
-search results.
-
-8. If no approved doctors were found, tell the user that
-no matching approved doctor is currently available
-in the system.
-
-9. If the user's symptoms may indicate an emergency,
-prioritize urgent medical care advice instead of
-normal doctor recommendations.
-
-10. Respond in the same language as the user:
-English or Roman Urdu.
-
-11. Keep the response professional, empathetic,
-clear, and concise.
-"""
-
-        final_response = llm.invoke(
-            final_prompt
+        return generate_doctor_response(
+            query=query,
+            result=result,
+            context=context
         )
-
-        return final_response.content
 
     # -----------------------------------------------------
-    # 4. NORMAL MEDICAL RESPONSE
+    # NORMAL MEDICAL RESPONSE
     # -----------------------------------------------------
 
     return response.content
 
 
 # =========================================================
-# API ENDPOINT
+# MAIN AI FUNCTION
+# =========================================================
+
+def ask_medical_assistant(query: str):
+
+    query = query.strip()
+
+    if not query:
+        return (
+            "Please enter a medical question or describe "
+            "your symptoms."
+        )
+
+    # =====================================================
+    # DIRECT DOCTOR QUERY
+    # =====================================================
+
+    if is_doctor_query(query):
+
+        response = llm_with_tools.invoke(
+            prompt.invoke(
+                {
+                    "context": "",
+                    "question": query
+                }
+            )
+        )
+
+        # -------------------------------------------------
+        # GEMINI DECIDED TO SEARCH DOCTORS
+        # -------------------------------------------------
+
+        if response.tool_calls:
+
+            tool_call = response.tool_calls[0]
+
+            tool_args = tool_call.get(
+                "args",
+                {}
+            )
+
+            result = search_doctors.invoke(
+                tool_args
+            )
+
+            return generate_doctor_response(
+                query=query,
+                result=result
+            )
+
+        # -------------------------------------------------
+        # FALLBACK
+        # -------------------------------------------------
+
+        return response.content
+
+    # =====================================================
+    # NORMAL MEDICAL QUESTION
+    # =====================================================
+
+    medical_results = retrieve_medical_context(
+        query,
+        limit=5
+    )
+
+    context = format_medical_context(
+        medical_results
+    )
+
+    return generate_medical_response(
+        query=query,
+        context=context
+    )
+
+
+# =========================================================
+# CHAT API
 # =========================================================
 
 @app.post("/api/chat")
@@ -413,15 +812,33 @@ def chat_endpoint(
     request: QueryRequest
 ):
 
-    ai_response = ask_medical_assistant(
-        request.query
-    )
+    try:
 
-    return {
-        "status": "success",
-        "query": request.query,
-        "response": ai_response
-    }
+        ai_response = ask_medical_assistant(
+            request.query
+        )
+
+        return {
+            "status": "success",
+            "query": request.query,
+            "response": ai_response
+        }
+
+    except Exception as error:
+
+        print(
+            "Chat API Error:",
+            str(error)
+        )
+
+        return {
+            "status": "error",
+            "query": request.query,
+            "response": (
+                "Sorry, I was unable to process your "
+                "request right now. Please try again."
+            )
+        }
 
 
 # =========================================================
