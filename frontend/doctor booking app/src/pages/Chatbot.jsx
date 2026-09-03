@@ -11,6 +11,7 @@ const Chatbot = () => {
     const [toggle, setToggle] = useState(false);
     const [message, setMessage] = useState("");
     const [loading, setLoading] = useState(false);
+
     const messagesEndRef = useRef(null);
 
     const [messages, setMessages] = useState([
@@ -29,15 +30,11 @@ const Chatbot = () => {
     // SCROLL TO BOTTOM
     // ============================================================
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({
-            behavior: "smooth",
-        });
-    };
-
     useEffect(() => {
         if (toggle) {
-            scrollToBottom();
+            messagesEndRef.current?.scrollIntoView({
+                behavior: "smooth",
+            });
         }
     }, [messages, loading, toggle]);
 
@@ -120,7 +117,7 @@ const Chatbot = () => {
         }
 
         // ========================================================
-        // SAVE USER MESSAGE FOR UI
+        // USER MESSAGE
         // ========================================================
 
         const userMessage = {
@@ -140,7 +137,7 @@ const Chatbot = () => {
 
         try {
             // ====================================================
-            // CONVERT FRONTEND MESSAGES TO BACKEND HISTORY FORMAT
+            // CHAT HISTORY
             // ====================================================
 
             const history = messages.map((msg) => ({
@@ -175,7 +172,7 @@ const Chatbot = () => {
 
             if (!response.ok) {
                 throw new Error(
-                    `API request failed: ${response.status} `
+                    `API request failed: ${response.status}`
                 );
             }
 
@@ -233,38 +230,89 @@ const Chatbot = () => {
         }
     };
 
+    // ============================================================
+    // JSX
+    // ============================================================
+
     return (
         <>
-            {/* =====================================================
+            {/* ====================================================
                 CHATBOT WINDOW
-            ====================================================== */}
+            ===================================================== */}
 
             <div
-                className={`fixed bottom - 20 right - 4 sm: right - 6
-w - [calc(100 % -2rem)] sm: w - [400px]
-h - [600px] max - h - [75vh]
-bg - white rounded - 2xl shadow - 2xl
-                border border - gray - 200 overflow - hidden
-z - [100]
-                flex flex - col
-transition - all duration - 300 origin - bottom - right
-                ${toggle
+                className={`
+                    fixed
+                    bottom-20
+                    right-4
+                    sm:right-6
+
+                    w-[calc(100vw-2rem)]
+                    sm:w-100
+
+                    h-150
+                    max-h-[75vh]
+
+                    bg-white
+                    rounded-2xl
+                    shadow-2xl
+
+                    border
+                    border-gray-200
+
+                    overflow-hidden
+
+                    z-100
+
+                    flex
+                    flex-col
+
+                    transition-all
+                    duration-300
+                    origin-bottom-right
+
+                    ${toggle
                         ? "scale-100 opacity-100 pointer-events-auto"
                         : "scale-0 opacity-0 pointer-events-none"
-                    } `}
+                    }
+                `}
             >
                 {/* =================================================
                     HEADER
                 ================================================== */}
 
                 <div
-                    className="h-16 shrink-0 bg-gradient-to-r from-blue-600 to-indigo-600
-                    px-4 flex items-center justify-between text-white"
+                    className="
+                        h-16
+                        shrink-0
+
+                        bg-linear-to-r
+                        from-blue-600
+                        to-indigo-600
+
+                        px-4
+
+                        flex
+                        items-center
+                        justify-between
+
+                        text-white
+                    "
                 >
                     <div className="flex items-center gap-3">
                         <div
-                            className="w-10 h-10 bg-white/20 rounded-full
-                            flex items-center justify-center"
+                            className="
+                                w-10
+                                h-10
+                                shrink-0
+
+                                bg-white/20
+                                rounded-full
+
+                                flex
+                                items-center
+                                justify-center
+                            "
                         >
                             <FaRobot className="text-xl" />
                         </div>
@@ -276,9 +324,14 @@ transition - all duration - 300 origin - bottom - right
 
                             <div className="flex items-center gap-1.5">
                                 <span
-                                    className="w-2 h-2 bg-green-400
-                                    rounded-full animate-pulse"
-                                ></span>
+                                    className="
+                                        w-2
+                                        h-2
+                                        bg-green-400
+                                        rounded-full
+                                        animate-pulse
+                                    "
+                                />
 
                                 <span className="text-xs text-blue-100">
                                     Online
@@ -292,10 +345,22 @@ transition - all duration - 300 origin - bottom - right
                     <button
                         type="button"
                         onClick={() => setToggle(false)}
-                        className="w-8 h-8 rounded-full
-                        hover:bg-white/20
-                        flex items-center justify-center
-                        transition cursor-pointer"
+                        aria-label="Close chatbot"
+                        className="
+                            w-8
+                            h-8
+
+                            rounded-full
+
+                            hover:bg-white/20
+
+                            flex
+                            items-center
+                            justify-center
+
+                            transition
+                            cursor-pointer
+                        "
                     >
                         <FaTimes />
                     </button>
@@ -306,27 +371,52 @@ transition - all duration - 300 origin - bottom - right
                 ================================================== */}
 
                 <div
-                    className="flex-1 min-h-0 overflow-y-auto
-                    bg-gray-50 p-4 space-y-4"
+                    className="
+                        flex-1
+                        min-h-0
+
+                        overflow-y-auto
+
+                        bg-gray-50
+
+                        p-4
+                        space-y-4
+                    "
                 >
                     {messages.map((msg) => (
                         <div
                             key={msg.id}
-                            className={`flex items - start gap - 2
-                            ${msg.sender === "user"
+                            className={`
+                                flex
+                                items-start
+                                gap-2
+
+                                ${msg.sender === "user"
                                     ? "justify-end"
                                     : ""
-                                } `}
+                                }
+                            `}
                         >
                             {/* BOT ICON */}
 
                             {msg.sender === "bot" && (
                                 <div
-                                    className="w-8 h-8 shrink-0
-                                    bg-blue-600 text-white
-                                    rounded-full
-                                    flex items-center justify-center
-                                    mt-1"
+                                    className="
+                                        w-8
+                                        h-8
+                                        shrink-0
+
+                                        bg-blue-600
+                                        text-white
+
+                                        rounded-full
+
+                                        flex
+                                        items-center
+                                        justify-center
+
+                                        mt-1
+                                    "
                                 >
                                     <FaRobot className="text-sm" />
                                 </div>
@@ -335,24 +425,33 @@ transition - all duration - 300 origin - bottom - right
                             {/* MESSAGE */}
 
                             <div
-                                className={`max - w - [80 %]
-                                ${msg.sender === "user"
+                                className={`
+                                    max-w-[80%]
+
+                                    ${msg.sender === "user"
                                         ? "order-first"
                                         : ""
-                                    } `}
+                                    }
+                                `}
                             >
                                 <div
-                                    className={`px - 4 py - 3
-                                    ${msg.sender === "user"
+                                    className={`
+                                        px-4
+                                        py-3
+
+                                        ${msg.sender === "user"
                                             ? "bg-blue-600 text-white rounded-2xl rounded-tr-sm"
                                             : "bg-white border border-gray-200 shadow-sm text-gray-800 rounded-2xl rounded-tl-sm"
-                                        } `}
+                                        }
+                                    `}
                                 >
                                     <p
-                                        className="text-sm
-                                        whitespace-pre-wrap
-                                        leading-relaxed
-                                        break-words"
+                                        className="
+                                            text-sm
+                                            whitespace-pre-wrap
+                                            leading-relaxed
+                                            wrap-break-word
+                                        "
                                     >
                                         {msg.text}
                                     </p>
@@ -361,12 +460,18 @@ transition - all duration - 300 origin - bottom - right
                                 {/* TIME */}
 
                                 <span
-                                    className={`text - [10px] text - gray - 400
-mt - 1 block
-                                    ${msg.sender === "user"
+                                    className={`
+                                        text-[10px]
+                                        text-gray-400
+
+                                        mt-1
+                                        block
+
+                                        ${msg.sender === "user"
                                             ? "text-right mr-1"
                                             : "ml-1"
-                                        } `}
+                                        }
+                                    `}
                                 >
                                     {msg.time}
                                 </span>
@@ -376,11 +481,22 @@ mt - 1 block
 
                             {msg.sender === "user" && (
                                 <div
-                                    className="w-8 h-8 shrink-0
-                                    bg-gray-200 text-gray-600
-                                    rounded-full
-                                    flex items-center justify-center
-                                    mt-1"
+                                    className="
+                                        w-8
+                                        h-8
+                                        shrink-0
+
+                                        bg-gray-200
+                                        text-gray-600
+
+                                        rounded-full
+
+                                        flex
+                                        items-center
+                                        justify-center
+
+                                        mt-1
+                                    "
                                 >
                                     <FaUser className="text-sm" />
                                 </div>
@@ -395,43 +511,83 @@ mt - 1 block
                     {loading && (
                         <div className="flex items-start gap-2">
                             <div
-                                className="w-8 h-8 shrink-0
-                                bg-blue-600 text-white
-                                rounded-full
-                                flex items-center justify-center"
+                                className="
+                                    w-8
+                                    h-8
+                                    shrink-0
+
+                                    bg-blue-600
+                                    text-white
+
+                                    rounded-full
+
+                                    flex
+                                    items-center
+                                    justify-center
+                                "
                             >
                                 <FaRobot className="text-sm" />
                             </div>
 
                             <div
-                                className="bg-white
-                                border border-gray-200
-                                shadow-sm rounded-2xl
-                                rounded-tl-sm px-4 py-3"
+                                className="
+                                    bg-white
+
+                                    border
+                                    border-gray-200
+
+                                    shadow-sm
+
+                                    rounded-2xl
+                                    rounded-tl-sm
+
+                                    px-4
+                                    py-3
+                                "
                             >
                                 <div className="flex gap-1.5 items-center">
                                     <span
-                                        className="w-2 h-2
-                                        bg-gray-400
-                                        rounded-full
-                                        animate-bounce"
-                                    ></span>
+                                        className="
+                                            w-2
+                                            h-2
+
+                                            bg-gray-400
+
+                                            rounded-full
+
+                                            animate-bounce
+                                        "
+                                    />
 
                                     <span
-                                        className="w-2 h-2
-                                        bg-gray-400
-                                        rounded-full
-                                        animate-bounce
-                                        [animation-delay:150ms]"
-                                    ></span>
+                                        className="
+                                            w-2
+                                            h-2
+
+                                            bg-gray-400
+
+                                            rounded-full
+
+                                            animate-bounce
+
+                                            [animation-delay:150ms]
+                                        "
+                                    />
 
                                     <span
-                                        className="w-2 h-2
-                                        bg-gray-400
-                                        rounded-full
-                                        animate-bounce
-                                        [animation-delay:300ms]"
-                                    ></span>
+                                        className="
+                                            w-2
+                                            h-2
+
+                                            bg-gray-400
+
+                                            rounded-full
+
+                                            animate-bounce
+
+                                            [animation-delay:300ms]
+                                        "
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -447,8 +603,17 @@ mt - 1 block
                 ================================================== */}
 
                 <div
-                    className="h-16 shrink-0 bg-white
-                    border-t border-gray-200 p-2.5"
+                    className="
+                        h-16
+                        shrink-0
+
+                        bg-white
+
+                        border-t
+                        border-gray-200
+
+                        p-2.5
+                    "
                 >
                     <div className="flex items-center gap-2 h-full">
                         <input
@@ -464,12 +629,26 @@ mt - 1 block
                             }}
                             placeholder="Type your message..."
                             disabled={loading}
-                            className="flex-1 h-10 px-4
-                            text-sm bg-gray-100
-                            rounded-full outline-none
-                            focus:ring-2 focus:ring-blue-500
-                            transition
-                            disabled:opacity-50"
+                            className="
+                                flex-1
+                                h-10
+
+                                px-4
+
+                                text-sm
+
+                                bg-gray-100
+                                rounded-full
+
+                                outline-none
+
+                                focus:ring-2
+                                focus:ring-blue-500
+
+                                transition
+
+                                disabled:opacity-50
+                            "
                         />
 
                         <button
@@ -479,14 +658,33 @@ mt - 1 block
                                 loading ||
                                 !message.trim()
                             }
-                            className="w-10 h-10 shrink-0
-                            bg-blue-600 hover:bg-blue-700
-                            disabled:bg-gray-300
-                            text-white rounded-full
-                            flex items-center justify-center
-                            transition active:scale-95
-                            cursor-pointer
-                            disabled:cursor-not-allowed"
+                            aria-label="Send message"
+                            className="
+                                w-10
+                                h-10
+                                shrink-0
+
+                                bg-blue-600
+                                hover:bg-blue-700
+
+                                disabled:bg-gray-300
+
+                                text-white
+
+                                rounded-full
+
+                                flex
+                                items-center
+                                justify-center
+
+                                transition
+
+                                active:scale-95
+
+                                cursor-pointer
+
+                                disabled:cursor-not-allowed
+                            "
                         >
                             <FaPaperPlane className="text-xs" />
                         </button>
@@ -494,9 +692,9 @@ mt - 1 block
                 </div>
             </div>
 
-            {/* =====================================================
+            {/* ====================================================
                 FLOATING CHAT BUTTON
-            ====================================================== */}
+            ===================================================== */}
 
             <button
                 type="button"
@@ -506,15 +704,41 @@ mt - 1 block
                         ? "Close chatbot"
                         : "Open chatbot"
                 }
-                className="fixed bottom-5 right-4 sm:right-6
-                w-14 h-14
-                bg-gradient-to-r from-blue-600 to-indigo-600
-                text-white rounded-full shadow-lg
-                flex items-center justify-center
-                z-[101]
-                hover:scale-110
-                transition-all duration-300
-                active:scale-95 cursor-pointer"
+                className="
+                    fixed
+
+                    bottom-5
+                    right-4
+                    sm:right-6
+
+                    w-14
+                    h-14
+
+                    bg-linear-to-r
+                    from-blue-600
+                    to-indigo-600
+
+                    text-white
+
+                    rounded-full
+
+                    shadow-lg
+
+                    flex
+                    items-center
+                    justify-center
+
+                    z-101
+
+                    hover:scale-110
+
+                    transition-all
+                    duration-300
+
+                    active:scale-95
+
+                    cursor-pointer
+                "
             >
                 {toggle ? (
                     <FaTimes className="text-xl" />
