@@ -2,15 +2,18 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai import (
+    ChatGoogleGenerativeAI,
+    GoogleGenerativeAIEmbeddings
+)
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -36,9 +39,13 @@ CHROMA_DIR = Path("/tmp/medical_chroma")
 load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not MONGODB_URI:
     raise RuntimeError("MONGODB_URI environment variable is missing.")
+
+if not GOOGLE_API_KEY:
+    raise RuntimeError("GOOGLE_API_KEY environment variable is missing.")
 
 
 # =========================================================
@@ -105,8 +112,8 @@ documents = text_splitter.split_documents(document)
 # EMBEDDINGS
 # =========================================================
 
-embeddings = FastEmbedEmbeddings(
-    model_name="BAAI/bge-small-en-v1.5"
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="gemini-embedding-001"
 )
 
 
@@ -120,7 +127,6 @@ docsearch = Chroma.from_documents(
     collection_name="abc",
     persist_directory=str(CHROMA_DIR)
 )
-
 
 retriever = docsearch.as_retriever(
     search_type="similarity",
@@ -146,13 +152,12 @@ def format_docs(docs):
 prompt_template = """
 Instructions:
 
-You are a professional AI Medical Assistant. Your role is to provide
-clear, accurate, safe, and clinically responsible health information.
+You are a professional AI Medical Assistant.
+Your role is to provide clear, accurate, safe, and clinically responsible health information.
 
 KNOWLEDGE AND CONTEXT RULES
 
-1. FIRST, inspect the provided Context carefully and determine whether
-it contains sufficient information to answer the user's question.
+1. FIRST, inspect the provided Context carefully and determine whether it contains sufficient information to answer the user's question.
 
 2. IF the answer is fully supported by the Context:
 - Answer primarily using the information available in the Context.
@@ -170,32 +175,28 @@ it contains sufficient information to answer the user's question.
 MEDICAL SAFETY RULES
 
 5. Never claim that a user definitely has a disease based only on symptoms.
+
 6. Always identify emergency warning signs when relevant.
+
 7. Never invent doctor information, availability, timing, or fees.
 
 SPECIALIST RECOMMENDATION RULES
 
-8. If the user describes symptoms and asks which doctor they should
-consult, do NOT diagnose the disease.
+8. If the user describes symptoms and asks which doctor they should consult, do NOT diagnose the disease.
 
-9. Instead, identify the most appropriate medical specialty based on
-the symptoms.
+9. Instead, identify the most appropriate medical specialty based on the symptoms.
 
-10. If a suitable specialty can be identified, use the search_doctors
-tool to find admin-approved doctors in that specialty.
+10. If a suitable specialty can be identified, use the search_doctors tool to find admin-approved doctors in that specialty.
 
 11. If the user provides a city, pass that city to the search_doctors tool.
 
-12. Clearly tell the user that the recommended specialty is guidance
-and not a medical diagnosis.
+12. Clearly tell the user that the recommended specialty is guidance and not a medical diagnosis.
 
-13. If the symptoms may indicate an emergency, prioritize urgent medical
-care advice instead of recommending a normal appointment.
+13. If the symptoms may indicate an emergency, prioritize urgent medical care advice instead of recommending a normal appointment.
 
 ANSWER QUALITY
 
-14. Give answers in a professional, empathetic, and clear manner using
-clean Markdown formatting (bolding, bullet points).
+14. Give answers in a professional, empathetic, and clear manner using clean Markdown formatting (bolding, bullet points).
 
 15. Respond in the same language as the user (English or Roman Urdu).
 
@@ -207,7 +208,9 @@ Question:
 """
 
 
-prompt = ChatPromptTemplate.from_template(prompt_template)
+prompt = ChatPromptTemplate.from_template(
+    prompt_template
+)
 
 
 # =========================================================
@@ -287,10 +290,12 @@ def ask_medical_assistant(query):
     context = format_docs(docs)
 
     response = llm_with_tools.invoke(
-        prompt.invoke({
-            "context": context,
-            "question": query
-        })
+        prompt.invoke(
+            {
+                "context": context,
+                "question": query
+            }
+        )
     )
 
     # -----------------------------------------------------
@@ -321,16 +326,13 @@ Instructions:
 
 1. If the user described symptoms, DO NOT diagnose the patient.
 
-2. If a medical specialty was identified from the symptoms,
-clearly explain that this specialty may be appropriate to consult.
+2. If a medical specialty was identified from the symptoms, clearly explain that this specialty may be appropriate to consult.
 
 3. Clearly state that the recommendation is not a medical diagnosis.
 
-4. If approved doctors were found in the database, list them clearly
-using only the information returned by the database.
+4. If approved doctors were found in the database, list them clearly using only the information returned by the database.
 
 5. For each doctor, show available information such as:
-
 - Name
 - Specialty
 - Experience
@@ -338,23 +340,22 @@ using only the information returned by the database.
 - Consultation Fee
 - Available Timings
 
-6. NEVER invent doctor information, fees, timings, availability,
-experience, or qualifications.
+6. NEVER invent doctor information, fees, timings, availability, experience, or qualifications.
 
 7. Only recommend doctors that appear in the database search results.
 
-8. If no approved doctors were found, tell the user that no matching
-approved doctor is currently available in the system.
+8. If no approved doctors were found, tell the user that no matching approved doctor is currently available in the system.
 
-9. If the user's symptoms may indicate an emergency, prioritize urgent
-medical care advice instead of normal doctor recommendations.
+9. If the user's symptoms may indicate an emergency, prioritize urgent medical care advice instead of normal doctor recommendations.
 
 10. Respond in the same language as the user: English or Roman Urdu.
 
 11. Keep the response professional, empathetic, clear, and concise.
 """
 
-        final_response = llm.invoke(final_prompt)
+        final_response = llm.invoke(
+            final_prompt
+        )
 
         return final_response.content
 
@@ -376,4 +377,16 @@ def chat_endpoint(request: QueryRequest):
         "status": "success",
         "query": request.query,
         "response": ai_response
+    }
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.get("/")
+def root():
+    return {
+        "status": "success",
+        "message": "AI Medical Assistant API is running"
     }
