@@ -90,11 +90,15 @@ const login = asyncHandler(async (req, res, next) => {
 
     res.cookie('accessToken', accessToken, {
         maxAge: 1000 * 60 * 15,
-        httpOnly: true
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
     })
     res.cookie('refreshToken', refreshToken, {
         maxAge: 1000 * 60 * 60 * 24 * 30,
-        httpOnly: true
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
     })
 
     res.status(200).json({

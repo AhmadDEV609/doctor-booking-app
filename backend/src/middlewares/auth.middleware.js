@@ -41,7 +41,9 @@ const generateNewToken = asyncHandler(async (req, res, next) => {
 
     res.cookie('accessToken', accessToken, {
         maxAge: 1000 * 60 * 15,
-        httpOnly: true
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
     })
 
     res.status(200).json({
