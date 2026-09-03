@@ -88,7 +88,7 @@ const Chatbot = () => {
         setLoading(true);
 
         try {
-            const response = await fetch("http://127.0.0.1:8000/api/chat", {
+            const response = await fetch("https://doctor-booking-app-chatbot-backend-b9n01o8bp-ahmad-s-projects20.vercel.app/api/chat", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
