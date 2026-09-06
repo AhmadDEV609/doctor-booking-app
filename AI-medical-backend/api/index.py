@@ -1,7 +1,9 @@
 import os
 import re
+import json
 
 from dotenv import load_dotenv
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,103 +18,64 @@ from langchain_google_genai import (
 from langchain_core.prompts import ChatPromptTemplate
 
 
-# ============================================================
-# ENVIRONMENT
-# ============================================================
 
 load_dotenv()
 
-MONGODB_URI = os.getenv("MONGODB_URI")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-if not MONGODB_URI:
-    raise ValueError("MONGODB_URI is not configured")
+MONGODB_URI = os.getenv("MONGODB_URI")
 
 if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is not configured")
+    raise ValueError("GOOGLE_API_KEY is missing")
+
+if not MONGODB_URI:
+    raise ValueError("MONGODB_URI is missing")
 
 
-# ============================================================
-# FASTAPI
-# ============================================================
 
-app = FastAPI(
-    title="AI Medical Assistant API",
-    version="1.0.0"
-)
+app = FastAPI()
 
-
-# ============================================================
-# CORS
-# ============================================================
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ============================================================
-# MONGODB
-# ============================================================
-
 client = MongoClient(MONGODB_URI)
 
-db = client["test"]
+db = client["medical_assistant"]
 
-medical_collection = db["medical_chunks"]
+medical_chunks_collection = db["medical_chunks"]
 doctors_collection = db["doctors"]
 users_collection = db["users"]
 
 
-# ============================================================
-# GEMINI EMBEDDINGS
-# ============================================================
-
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="gemini-embedding-001"
+    model="models/gemini-embedding-001",
+    google_api_key=GOOGLE_API_KEY
 )
 
-
-# ============================================================
-# GEMINI LLM
-# ============================================================
 
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
-    temperature=0.0
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.2
 )
 
 
-# ============================================================
-# REQUEST MODELS
-# ============================================================
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
 
 
 class QueryRequest(BaseModel):
+
     query: str
-    history: list[ChatMessage] = []
+
+    history: list = []
 
 
-# ============================================================
-# SPECIALTY ALIASES
-# ============================================================
 
-# IMPORTANT:
-# These values must match the "speciality" values
-# stored in your MongoDB doctors collection.
-#
-# Example:
-# DB has:
-# speciality = "heart"
-# speciality = "ENT"
 
 SPECIALTY_ALIASES = {
 
@@ -121,15 +84,12 @@ SPECIALTY_ALIASES = {
     "cardiology": "heart",
     "heart specialist": "heart",
     "heart doctor": "heart",
-    "heart specialist doctor": "heart",
 
     # ENT
     "ent": "ENT",
     "ent specialist": "ENT",
-    "ent doctor": "ENT",
     "ear nose throat": "ENT",
-    "ear, nose and throat": "ENT",
-    "otolaryngologist": "ENT",
+    "ear doctor": "ENT",
 
     # Dermatology
     "dermatologist": "dermatology",
@@ -143,22 +103,20 @@ SPECIALTY_ALIASES = {
     "brain specialist": "neurology",
     "nerve specialist": "neurology",
 
-    # Orthopedics
+    # Orthopedic
     "orthopedic": "orthopedic",
-    "orthopaedic": "orthopedic",
+    "orthopedist": "orthopedic",
     "orthopedic doctor": "orthopedic",
     "bone specialist": "orthopedic",
-    "joint specialist": "orthopedic",
 
     # Gynecology
     "gynecologist": "gynecology",
-    "gynaecologist": "gynecology",
     "gynecology": "gynecology",
+    "gynae": "gynecology",
     "women specialist": "gynecology",
 
     # Pediatrics
     "pediatrician": "pediatrics",
-    "paediatrician": "pediatrics",
     "pediatrics": "pediatrics",
     "child specialist": "pediatrics",
     "children doctor": "pediatrics",
@@ -167,11 +125,13 @@ SPECIALTY_ALIASES = {
     "gastroenterologist": "gastroenterology",
     "gastroenterology": "gastroenterology",
     "stomach specialist": "gastroenterology",
+    "stomach doctor": "gastroenterology",
 
     # Urology
     "urologist": "urology",
     "urology": "urology",
     "urinary specialist": "urology",
+    "urine doctor": "urology",
 
     # Pulmonology
     "pulmonologist": "pulmonology",
@@ -183,11 +143,13 @@ SPECIALTY_ALIASES = {
     "endocrinologist": "endocrinology",
     "endocrinology": "endocrinology",
     "diabetes specialist": "endocrinology",
+    "hormone specialist": "endocrinology",
 
     # Psychiatry
     "psychiatrist": "psychiatry",
     "psychiatry": "psychiatry",
     "mental health specialist": "psychiatry",
+    "mental health doctor": "psychiatry",
 
     # Ophthalmology
     "ophthalmologist": "ophthalmology",
@@ -198,220 +160,65 @@ SPECIALTY_ALIASES = {
     # Dentistry
     "dentist": "dentistry",
     "dental": "dentistry",
-    "dentistry": "dentistry",
+    "dental specialist": "dentistry",
     "teeth specialist": "dentistry",
 }
 
 
-# ============================================================
-# SYMPTOM → SPECIALTY MAPPING
-# ============================================================
-
-# This is used before searching doctors.
-#
-# IMPORTANT:
-# This does NOT diagnose a disease.
-# It only identifies an appropriate medical specialty.
-
-SYMPTOM_SPECIALTY_RULES = {
-
-    # --------------------------------------------------------
-    # HEART / CARDIOLOGY
-    # --------------------------------------------------------
-
-    "chest pain": "heart",
-    "chest pressure": "heart",
-    "chest tightness": "heart",
-    "heart pain": "heart",
-    "heart racing": "heart",
-    "palpitations": "heart",
-    "irregular heartbeat": "heart",
-    "fast heartbeat": "heart",
-    "slow heartbeat": "heart",
-
-    # --------------------------------------------------------
-    # ENT
-    # --------------------------------------------------------
-
-    "ear pain": "ENT",
-    "earache": "ENT",
-    "hearing loss": "ENT",
-    "hearing problem": "ENT",
-    "ringing in ear": "ENT",
-    "tinnitus": "ENT",
-    "sore throat": "ENT",
-    "throat pain": "ENT",
-    "tonsil": "ENT",
-    "sinus": "ENT",
-    "blocked nose": "ENT",
-    "nasal congestion": "ENT",
-    "nose bleeding": "ENT",
-
-    # --------------------------------------------------------
-    # DERMATOLOGY
-    # --------------------------------------------------------
-
-    "skin rash": "dermatology",
-    "rash": "dermatology",
-    "acne": "dermatology",
-    "pimples": "dermatology",
-    "skin itching": "dermatology",
-    "itchy skin": "dermatology",
-    "skin allergy": "dermatology",
-    "hair loss": "dermatology",
-    "eczema": "dermatology",
-    "psoriasis": "dermatology",
-
-    # --------------------------------------------------------
-    # NEUROLOGY
-    # --------------------------------------------------------
-
-    "severe headache": "neurology",
-    "migraine": "neurology",
-    "frequent headache": "neurology",
-    "dizziness": "neurology",
-    "numbness": "neurology",
-    "tingling": "neurology",
-    "seizure": "neurology",
-    "tremor": "neurology",
-    "memory problems": "neurology",
-
-    # --------------------------------------------------------
-    # ORTHOPEDICS
-    # --------------------------------------------------------
-
-    "bone pain": "orthopedic",
-    "joint pain": "orthopedic",
-    "knee pain": "orthopedic",
-    "back pain": "orthopedic",
-    "shoulder pain": "orthopedic",
-    "neck pain": "orthopedic",
-    "fracture": "orthopedic",
-    "muscle pain": "orthopedic",
-    "sprain": "orthopedic",
-
-    # --------------------------------------------------------
-    # GYNECOLOGY
-    # --------------------------------------------------------
-
-    "period pain": "gynecology",
-    "irregular periods": "gynecology",
-    "menstrual problem": "gynecology",
-    "pelvic pain": "gynecology",
-    "pregnancy": "gynecology",
-    "pregnancy problem": "gynecology",
-
-    # --------------------------------------------------------
-    # PEDIATRICS
-    # --------------------------------------------------------
-
-    "child fever": "pediatrics",
-    "baby fever": "pediatrics",
-    "child cough": "pediatrics",
-    "child illness": "pediatrics",
-
-    # --------------------------------------------------------
-    # GASTROENTEROLOGY
-    # --------------------------------------------------------
-
-    "stomach pain": "gastroenterology",
-    "abdominal pain": "gastroenterology",
-    "constipation": "gastroenterology",
-    "diarrhea": "gastroenterology",
-    "vomiting": "gastroenterology",
-    "acid reflux": "gastroenterology",
-    "heartburn": "gastroenterology",
-
-    # --------------------------------------------------------
-    # UROLOGY
-    # --------------------------------------------------------
-
-    "urine problem": "urology",
-    "urination problem": "urology",
-    "painful urination": "urology",
-    "kidney stone": "urology",
-    "blood in urine": "urology",
-
-    # --------------------------------------------------------
-    # PULMONOLOGY
-    # --------------------------------------------------------
-
-    "breathing problem": "pulmonology",
-    "shortness of breath": "pulmonology",
-    "breathing difficulty": "pulmonology",
-    "persistent cough": "pulmonology",
-    "chronic cough": "pulmonology",
-    "lung problem": "pulmonology",
-    "wheezing": "pulmonology",
-
-    # --------------------------------------------------------
-    # ENDOCRINOLOGY
-    # --------------------------------------------------------
-
-    "diabetes": "endocrinology",
-    "high blood sugar": "endocrinology",
-    "low blood sugar": "endocrinology",
-    "thyroid problem": "endocrinology",
-    "thyroid": "endocrinology",
-
-    # --------------------------------------------------------
-    # PSYCHIATRY
-    # --------------------------------------------------------
-
-    "anxiety": "psychiatry",
-    "panic attack": "psychiatry",
-    "depression": "psychiatry",
-    "mental health": "psychiatry",
-    "stress": "psychiatry",
-
-    # --------------------------------------------------------
-    # OPHTHALMOLOGY
-    # --------------------------------------------------------
-
-    "eye pain": "ophthalmology",
-    "eye problem": "ophthalmology",
-    "blurred vision": "ophthalmology",
-    "vision problem": "ophthalmology",
-    "red eyes": "ophthalmology",
-
-    # --------------------------------------------------------
-    # DENTISTRY
-    # --------------------------------------------------------
-
-    "tooth pain": "dentistry",
-    "toothache": "dentistry",
-    "gum pain": "dentistry",
-    "dental pain": "dentistry",
-}
-
-
-# ============================================================
-# CITY EXTRACTION
-# ============================================================
 
 KNOWN_CITIES = [
     "lahore",
     "karachi",
     "islamabad",
     "rawalpindi",
+    "faisalabad",
+    "multan",
     "peshawar",
     "quetta",
-    "multan",
-    "faisalabad",
     "gujranwala",
     "sialkot",
     "hyderabad",
-    "bahawalpur"
+    "bahawalpur",
 ]
 
 
-def extract_city(text: str):
+def format_history(history):
+
+    if not history:
+        return ""
+
+    recent_history = history[-10:]
+
+    formatted = []
+
+    for message in recent_history:
+
+        role = message.get("role", "")
+        content = message.get("content", "")
+
+        formatted.append(
+            f"{role}: {content}"
+        )
+
+    return "\n".join(formatted)
+
+
+# ============================================================
+# CITY EXTRACTION
+#
+# Used for MongoDB doctor search.
+# ============================================================
+
+def extract_city(text):
 
     text_lower = text.lower()
 
     for city in KNOWN_CITIES:
 
-        if city in text_lower:
+        if re.search(
+            rf"\b{re.escape(city)}\b",
+            text_lower
+        ):
             return city
 
     return ""
@@ -419,187 +226,357 @@ def extract_city(text: str):
 
 # ============================================================
 # SPECIALTY EXTRACTION
+#
+# Used mainly for direct doctor requests.
 # ============================================================
 
-def extract_specialty(text: str):
+def extract_specialty(text):
 
     text_lower = text.lower().strip()
 
-    # Sort longest first
-    # Example:
-    # "heart specialist" should be checked before "heart"
-
-    sorted_aliases = sorted(
-        SPECIALTY_ALIASES.items(),
-        key=lambda item: len(item[0]),
+    aliases = sorted(
+        SPECIALTY_ALIASES.keys(),
+        key=len,
         reverse=True
     )
 
-    for alias, specialty in sorted_aliases:
+    for alias in aliases:
 
-        if alias in text_lower:
-            return specialty
+        if re.search(
+            rf"\b{re.escape(alias)}\b",
+            text_lower
+        ):
+            return SPECIALTY_ALIASES[alias]
 
     return ""
 
 
-# ============================================================
-# SYMPTOM → SPECIALTY
-# ============================================================
 
-def detect_specialty_from_symptoms(text: str):
 
-    text_lower = text.lower()
+def analyze_medical_query(
+    query,
+    history_text=""
+):
 
-    sorted_rules = sorted(
-        SYMPTOM_SPECIALTY_RULES.items(),
-        key=lambda item: len(item[0]),
-        reverse=True
+    prompt = ChatPromptTemplate.from_messages(
+        [
+
+            (
+                "system",
+                """
+You are the medical-intelligence router for a medical
+assistant application.
+
+Your job is NOT to diagnose the patient.
+
+Your job is to analyze the user's message and return
+ONLY valid JSON.
+
+The user may write in:
+
+- English
+- Urdu
+- Roman Urdu
+- mixed English/Roman Urdu
+- informal language
+- misspelled words
+- different descriptions of the same symptom
+
+You must understand the meaning rather than relying
+only on exact keywords.
+
+Determine:
+
+1. Whether the user is describing symptoms.
+2. Whether the symptoms may indicate an emergency.
+3. Which medical specialty would be the most appropriate
+   for a doctor search, if a doctor is needed.
+4. Whether the user is explicitly asking to find/show a doctor.
+5. Whether the user is asking a general medical question.
+
+IMPORTANT:
+
+- Do NOT diagnose the user.
+- Do NOT invent symptoms that were not mentioned.
+- Do NOT assume an emergency unless the information suggests
+  a potentially urgent or life-threatening situation.
+- When symptoms involve potentially serious warning signs,
+  set emergency=true.
+- If emergency=true, provide a short reason in emergency_reason.
+- Choose the most appropriate specialty from the allowed
+  specialties below.
+- If no specialty is reasonably identifiable, use "".
+- For a general medical question with no symptoms,
+  symptoms=false.
+- A user can describe symptoms without explicitly saying
+  "symptom".
+- Informal descriptions should be semantically understood.
+
+Allowed specialties:
+
+heart
+ENT
+dermatology
+neurology
+orthopedic
+gynecology
+pediatrics
+gastroenterology
+urology
+pulmonology
+endocrinology
+psychiatry
+ophthalmology
+dentistry
+general_medicine
+
+Return exactly this JSON structure:
+
+{
+    "is_symptom_query": true,
+    "emergency": false,
+    "emergency_reason": "",
+    "specialty": "",
+    "doctor_needed": false,
+    "direct_doctor_request": false,
+    "general_medical_question": false,
+    "symptoms": []
+}
+
+Rules for fields:
+
+is_symptom_query:
+true if user is describing one or more symptoms.
+
+emergency:
+true if the described situation may require immediate
+medical attention.
+
+specialty:
+the most appropriate medical specialty.
+
+doctor_needed:
+true when symptoms reasonably warrant seeing a doctor
+or the user is asking for a doctor.
+
+direct_doctor_request:
+true when the user explicitly asks to find/show/recommend
+a doctor or specialist.
+
+general_medical_question:
+true when the user is asking for medical information
+rather than asking to find a doctor.
+
+symptoms:
+list the symptoms actually understood from the user.
+Do not invent symptoms.
+
+Return JSON only.
+"""
+            ),
+
+            (
+                "human",
+                """
+Previous Conversation:
+
+{history_text}
+
+Current User Message:
+
+{query}
+
+Analyze the current message in the context of the
+previous conversation.
+Return JSON only.
+"""
+            )
+
+        ]
     )
 
-    for symptom, specialty in sorted_rules:
+    chain = prompt | llm
 
-        if symptom in text_lower:
-            return specialty
+    try:
 
-    return ""
+        response = chain.invoke(
+            {
+                "history_text": history_text,
+                "query": query,
+            }
+        )
 
+        content = response.content.strip()
 
-# ============================================================
-# HISTORY FORMATTER
-# ============================================================
+        # Remove markdown code fences if Gemini adds them
+        content = re.sub(
+            r"^```json\s*",
+            "",
+            content,
+            flags=re.IGNORECASE
+        )
 
-def format_history(history):
+        content = re.sub(
+            r"^```\s*",
+            "",
+            content
+        )
 
-    if not history:
-        return ""
+        content = re.sub(
+            r"\s*```$",
+            "",
+            content
+        )
 
-    return "\n".join(
-        f"{message.role}: {message.content}"
-        for message in history[-10:]
-    )
+        analysis = json.loads(content)
+
+        return analysis
+
+    except Exception as error:
+
+        print(
+            "Medical Analysis Error:",
+            error
+        )
+
+        # Safe fallback
+        return {
+            "is_symptom_query": False,
+            "emergency": False,
+            "emergency_reason": "",
+            "specialty": "",
+            "doctor_needed": False,
+            "direct_doctor_request": False,
+            "general_medical_question": True,
+            "symptoms": []
+        }
 
 
 # ============================================================
 # DOCTOR QUERY DETECTION
+#
+# Kept as fallback for direct doctor requests.
 # ============================================================
 
-def is_direct_doctor_query(query: str):
+def is_direct_doctor_query(query):
 
     query_lower = query.lower()
 
-    keywords = [
+    doctor_keywords = [
+
         "doctor",
         "doctors",
-        "approved doctor",
-        "approved doctors",
-        "doctor list",
-        "doctor lists",
-        "doctor detail",
-        "doctor details",
-        "doctor information",
-        "doctor info",
         "specialist",
         "specialists",
-        "consult doctor",
+        "physician",
         "which doctor",
-        "what doctor"
+        "find doctor",
+        "find doctors",
+        "show doctor",
+        "show doctors",
+        "need a doctor",
+        "recommend doctor",
+        "recommend a doctor",
     ]
 
-    return any(
-        keyword in query_lower
-        for keyword in keywords
-    )
+    for keyword in doctor_keywords:
+
+        if keyword in query_lower:
+            return True
+
+    return False
 
 
 # ============================================================
-# CHECK DOCTOR CONVERSATION CONTEXT
+# DOCTOR CONTEXT
 # ============================================================
 
-def is_doctor_context(history: str):
+def is_doctor_context(history_text):
 
-    history_lower = history.lower()
+    history_lower = history_text.lower()
 
-    doctor_terms = [
+    doctor_keywords = [
+
         "doctor",
         "doctors",
         "specialist",
         "specialists",
-        "approved doctor",
-        "approved doctors",
-        "doctor list",
-        "doctor details"
+        "physician",
+
+        "cardiologist",
+        "dermatologist",
+        "neurologist",
+        "orthopedic",
+        "gynecologist",
+        "pediatrician",
+        "gastroenterologist",
+        "urologist",
+        "pulmonologist",
+        "psychiatrist",
+        "ophthalmologist",
+        "dentist",
     ]
 
-    return any(
-        term in history_lower
-        for term in doctor_terms
-    )
+    for keyword in doctor_keywords:
+
+        if keyword in history_lower:
+            return True
+
+    return False
 
 
 # ============================================================
-# FIND APPROVED DOCTORS
+# APPROVED DOCTORS SEARCH
+#
+# SAME MONGODB LOGIC
 # ============================================================
 
 def find_approved_doctors(
-    specialty: str = "",
-    city: str = ""
+    specialty="",
+    city=""
 ):
 
-    query = {
+    mongo_query = {
         "approveStatus": "approved"
     }
 
-    specialty = specialty.strip()
-    city = city.strip()
-
     # --------------------------------------------------------
-    # SPECIALTY FILTER
+    # Specialty filter
     # --------------------------------------------------------
 
     if specialty:
 
-        query["speciality"] = {
-            "$regex": re.escape(specialty),
+        mongo_query["speciality"] = {
+            "$regex": f"^{re.escape(specialty)}$",
             "$options": "i"
         }
 
     # --------------------------------------------------------
-    # CITY FILTER
+    # City filter
     # --------------------------------------------------------
 
     if city:
 
-        query["city"] = {
-            "$regex": re.escape(city),
+        mongo_query["city"] = {
+            "$regex": f"^{re.escape(city)}$",
             "$options": "i"
         }
 
-    # --------------------------------------------------------
-    # FETCH DOCTORS
-    # --------------------------------------------------------
-
-    doctors = list(
-        doctors_collection.find(
-            query,
-            {
-                "_id": 1,
-                "userId": 1,
-                "speciality": 1,
-                "experience": 1,
-                "fee": 1,
-                "city": 1,
-                "checkDuration": 1,
-                "availability": 1
-            }
-        )
+    doctors = doctors_collection.find(
+        mongo_query,
+        {
+            "_id": 1,
+            "userId": 1,
+            "speciality": 1,
+            "experience": 1,
+            "fee": 1,
+            "city": 1,
+            "checkDuration": 1,
+            "availability": 1,
+        }
     )
 
-    formatted_doctors = []
-
-    # --------------------------------------------------------
-    # FETCH USER INFORMATION
-    # --------------------------------------------------------
+    result = []
 
     for doctor in doctors:
 
@@ -608,113 +585,85 @@ def find_approved_doctors(
                 "_id": doctor.get("userId")
             },
             {
-                "_id": 0,
                 "name": 1,
                 "email": 1,
                 "phone": 1,
                 "image": 1,
-                "bio": 1
+                "bio": 1,
             }
         )
 
-        formatted_doctors.append({
+        doctor_data = {
 
-            "name": (
-                user.get("name")
-                if user
-                else "Doctor"
-            ),
+            "_id": doctor.get("_id"),
 
-            "email": (
-                user.get("email")
-                if user
-                else None
-            ),
-
-            "phone": (
-                user.get("phone")
-                if user
-                else None
-            ),
-
-            "image": (
-                user.get("image")
-                if user
-                else None
-            ),
-
-            "bio": (
-                user.get("bio")
-                if user
-                else None
-            ),
+            "userId": doctor.get("userId"),
 
             "speciality": doctor.get(
-                "speciality"
+                "speciality",
+                ""
             ),
 
             "experience": doctor.get(
-                "experience"
+                "experience",
+                ""
             ),
 
             "fee": doctor.get(
-                "fee"
+                "fee",
+                ""
             ),
 
             "city": doctor.get(
-                "city"
+                "city",
+                ""
             ),
 
             "checkDuration": doctor.get(
-                "checkDuration"
+                "checkDuration",
+                ""
             ),
 
             "availability": doctor.get(
                 "availability",
                 []
-            )
-        })
+            ),
 
-    return formatted_doctors
+            "name": user.get(
+                "name",
+                ""
+            ) if user else "",
 
+            "email": user.get(
+                "email",
+                ""
+            ) if user else "",
 
-# ============================================================
-# FORMAT AVAILABILITY
-# ============================================================
+            "phone": user.get(
+                "phone",
+                ""
+            ) if user else "",
 
-def format_availability(availability):
+            "image": user.get(
+                "image",
+                ""
+            ) if user else "",
 
-    if not availability:
-        return "Not provided"
+            "bio": user.get(
+                "bio",
+                ""
+            ) if user else "",
+        }
 
-    formatted = []
+        result.append(doctor_data)
 
-    for slot in availability:
-
-        day = slot.get(
-            "day",
-            "N/A"
-        )
-
-        start = slot.get(
-            "startTime",
-            "N/A"
-        )
-
-        end = slot.get(
-            "endTime",
-            "N/A"
-        )
-
-        formatted.append(
-            f"{day}: {start} - {end}"
-        )
-
-    return ", ".join(formatted)
+    return result
 
 
 # ============================================================
-# FORMAT DOCTOR RESPONSE
+# DOCTOR RESPONSE GENERATOR
+#
+# SAME DOCTOR RESPONSE LOGIC
 # ============================================================
 
 def generate_doctor_response(
@@ -725,147 +674,165 @@ def generate_doctor_response(
 
     if not doctors:
 
-        criteria = []
-
-        if specialty:
-            criteria.append(
-                f"specialty: {specialty}"
-            )
-
-        if city:
-            criteria.append(
-                f"city: {city}"
-            )
-
-        criteria_text = ""
-
-        if criteria:
-            criteria_text = (
-                " for " + ", ".join(criteria)
-            )
-
         return (
-            "I could not find any approved doctors"
-            f"{criteria_text} in the system.\n\n"
-            "You can try another specialty or city."
+            "I could not find any approved doctors "
+            "matching your requested criteria."
         )
 
-    response = ""
-
-    if specialty or city:
-
-        response += (
-            "Here are the approved doctors "
-            "matching your request:\n\n"
-        )
-
-    else:
-
-        response += (
-            "Here are the approved doctors "
-            "available in our system:\n\n"
-        )
-
-    for index, doctor in enumerate(
+    doctor_data = json.dumps(
         doctors,
-        start=1
-    ):
+        default=str,
+        indent=2
+    )
 
-        response += f"""
-### {index}. {doctor["name"]}
+    prompt = ChatPromptTemplate.from_messages(
+        [
 
-- **Specialty:** {doctor.get("speciality") or "N/A"}
-- **Experience:** {doctor.get("experience") or "N/A"} years
-- **City:** {doctor.get("city") or "N/A"}
-- **Consultation Fee:** {doctor.get("fee") or "N/A"}
-- **Check Duration:** {doctor.get("checkDuration") or "N/A"} minutes
-- **Availability:** {format_availability(doctor.get("availability", []))}
+            (
+                "system",
+                """
+You are a medical appointment assistant.
+
+Your task is to format the doctor information
+provided to you.
+
+IMPORTANT RULES:
+
+1. Use ONLY the doctor data provided.
+2. Do NOT invent any information.
+3. Do NOT change doctor information.
+4. Do NOT remove any doctor.
+5. Display EVERY doctor.
+6. Keep the response concise and professional.
+7. Do not provide medical advice.
+8. Respond in the same language as the user when possible.
 """
+            ),
 
-        if doctor.get("bio"):
-            response += (
-                f'- **Bio:** {doctor["bio"]}\n'
+            (
+                "human",
+                """
+User requested:
+
+Specialty: {specialty}
+City: {city}
+
+Doctor data:
+
+{doctor_data}
+
+Format the doctor information clearly.
+"""
             )
 
-        response += "\n"
+        ]
+    )
 
-    return response
+    try:
+
+        chain = prompt | llm
+
+        response = chain.invoke(
+            {
+                "specialty": specialty,
+                "city": city,
+                "doctor_data": doctor_data,
+            }
+        )
+
+        return response.content
+
+    except Exception:
+
+        response_lines = []
+
+        for index, doctor in enumerate(
+            doctors,
+            start=1
+        ):
+
+            response_lines.append(
+                f"""
+Doctor {index}
+
+Name: {doctor.get("name", "N/A")}
+Speciality: {doctor.get("speciality", "N/A")}
+Experience: {doctor.get("experience", "N/A")}
+Fee: {doctor.get("fee", "N/A")}
+City: {doctor.get("city", "N/A")}
+Check Duration: {doctor.get("checkDuration", "N/A")}
+Email: {doctor.get("email", "N/A")}
+Phone: {doctor.get("phone", "N/A")}
+Bio: {doctor.get("bio", "N/A")}
+Availability: {doctor.get("availability", "N/A")}
+"""
+            )
+
+        return "\n".join(response_lines)
 
 
-# ============================================================
-# RAG RETRIEVAL
-# ============================================================
+
+# RAG — RETRIEVE MEDICAL CONTEXT
+#
+# SAME VECTOR SEARCH
+
 
 def retrieve_medical_context(
-    query: str,
-    limit: int = 5
+    query,
+    limit=5
 ):
 
-    # --------------------------------------------------------
-    # CREATE QUERY EMBEDDING
-    # --------------------------------------------------------
-
-    query_vector = embeddings.embed_query(
+    query_embedding = embeddings.embed_query(
         query
     )
 
-    # --------------------------------------------------------
-    # MONGODB VECTOR SEARCH
-    # --------------------------------------------------------
+    results = medical_chunks_collection.aggregate(
+        [
 
-    pipeline = [
+            {
+                "$vectorSearch": {
 
-        {
-            "$vectorSearch": {
+                    "index": "medical_vector_index",
 
-                "index": "medical_vector_index",
+                    "path": "embedding",
 
-                "path": "embedding",
+                    "queryVector": query_embedding,
 
-                "queryVector": query_vector,
+                    "numCandidates": 50,
 
-                "numCandidates": 50,
+                    "limit": limit,
+                }
+            },
 
-                "limit": limit
-            }
-        },
+            {
+                "$project": {
 
-        {
-            "$project": {
+                    "_id": 0,
 
-                "_id": 0,
+                    "text": 1,
 
-                "text": 1,
+                    "metadata": 1,
 
-                "metadata": 1,
-
-                "score": {
-                    "$meta": "vectorSearchScore"
+                    "score": {
+                        "$meta": "vectorSearchScore"
+                    }
                 }
             }
-        }
-    ]
-
-    results = list(
-        medical_collection.aggregate(
-            pipeline
-        )
+        ]
     )
 
-    return results
+    return list(results)
 
 
-# ============================================================
+
 # FORMAT RAG CONTEXT
-# ============================================================
+
 
 def format_medical_context(results):
 
     if not results:
-        return (
-            "No relevant medical information "
-            "was found in the knowledge base."
-        )
+
+        return "No relevant medical information was found."
 
     context_parts = []
 
@@ -879,298 +846,200 @@ def format_medical_context(results):
             ""
         )
 
-        if text:
+        score = result.get(
+            "score",
+            0
+        )
 
-            context_parts.append(
-                f"""
-Medical Source {index}:
+        context_parts.append(
+            f"""
+Medical Source {index}
+
+Relevance Score: {score}
 
 {text}
 """
-            )
+        )
 
-    return "\n".join(
+    return "\n\n".join(
         context_parts
     )
 
 
 # ============================================================
-# EMERGENCY DETECTION
+# RAG RELEVANCE CHECK
+#
+# This prevents unrelated chunks from being treated
+# as relevant context.
 # ============================================================
 
-EMERGENCY_KEYWORDS = [
+def has_relevant_rag_context(results):
 
-    "severe chest pain",
-    "chest pain with difficulty breathing",
-    "chest pain with shortness of breath",
+    if not results:
+        return False
 
-    "difficulty breathing",
-    "cannot breathe",
-    "can't breathe",
+    # MongoDB vector search score threshold.
+    #
+    # This is intentionally moderate.
+    # You can tune it later according to your dataset.
+    MIN_RELEVANCE_SCORE = 0.55
 
-    "severe bleeding",
-    "uncontrolled bleeding",
+    for result in results:
 
-    "unconscious",
-    "loss of consciousness",
+        score = result.get(
+            "score",
+            0
+        )
 
-    "seizure",
+        try:
+            score = float(score)
+        except Exception:
+            score = 0
 
-    "stroke symptoms",
-
-    "face drooping",
-    "slurred speech",
-
-    "severe allergic reaction",
-
-    "anaphylaxis"
-]
-
-
-def detect_emergency(query: str):
-
-    query_lower = query.lower()
-
-    for keyword in EMERGENCY_KEYWORDS:
-
-        if keyword in query_lower:
+        if score >= MIN_RELEVANCE_SCORE:
             return True
 
     return False
 
 
 # ============================================================
-# MEDICAL RESPONSE
+# EMERGENCY RESPONSE
 # ============================================================
 
-def generate_medical_response(
-    query: str,
-    history_text: str
+def build_emergency_response(
+    analysis,
+    specialty=""
 ):
 
-    # --------------------------------------------------------
-    # RAG
-    # --------------------------------------------------------
-
-    results = retrieve_medical_context(
-        query,
-        limit=5
+    reason = analysis.get(
+        "emergency_reason",
+        ""
     )
 
-    medical_context = format_medical_context(
-        results
+    if reason:
+
+        emergency_text = (
+            "⚠️ **This may require urgent medical attention.**\n\n"
+            f"{reason}\n\n"
+            "Please seek immediate medical attention or "
+            "contact your local emergency service. "
+            "Do not delay urgent care."
+        )
+
+    else:
+
+        emergency_text = (
+            "⚠️ **This may be a medical emergency.**\n\n"
+            "Please seek immediate medical attention or "
+            "contact your local emergency service. "
+            "Do not delay urgent care."
+        )
+
+    return emergency_text
+
+
+
+def handle_symptom_request(
+    query,
+    history_text,
+    analysis
+):
+
+    if not analysis.get(
+        "is_symptom_query",
+        False
+    ):
+        return None
+
+    specialty = analysis.get(
+        "specialty",
+        ""
+    )
+
+    doctor_needed = analysis.get(
+        "doctor_needed",
+        False
+    )
+
+    emergency = analysis.get(
+        "emergency",
+        False
     )
 
     # --------------------------------------------------------
-    # EMERGENCY CHECK
+    # Emergency first
     # --------------------------------------------------------
 
-    emergency = detect_emergency(
-        query
-    )
-
-    emergency_instruction = ""
+    emergency_response = ""
 
     if emergency:
 
-        emergency_instruction = """
-IMPORTANT:
-The user's symptoms may require urgent medical attention.
-
-Clearly advise the user to seek emergency medical
-care immediately, especially if symptoms are severe,
-worsening, or associated with breathing difficulty,
-fainting, severe bleeding, or other emergency signs.
-
-Do not provide a diagnosis.
-"""
-
-    # --------------------------------------------------------
-    # PROMPT
-    # --------------------------------------------------------
-
-    prompt = ChatPromptTemplate.from_messages([
-
-        (
-            "system",
-
-            """
-You are a professional AI Medical Assistant.
-
-Your responsibilities:
-
-1. Answer general medical questions.
-2. Use the provided medical knowledge context when relevant.
-3. Do not diagnose a disease with certainty.
-4. Explain medical information clearly.
-5. Give appropriate general safety guidance.
-6. If the user describes symptoms, explain possible
-   general causes without claiming a diagnosis.
-7. If symptoms may require urgent care, clearly recommend
-   appropriate medical attention.
-8. Answer in the same language as the user.
-9. Do not invent information from the database.
-10. Do not invent doctors.
-
-Doctor recommendations are handled separately by the
-application's doctor-search system.
-
-Medical Knowledge Context:
-
-{context}
-
-Conversation History:
-
-{history}
-
-{emergency_instruction}
-"""
-        ),
-
-        (
-            "human",
-            "{query}"
-        )
-    ])
-
-    messages = prompt.format_messages(
-
-        context=medical_context,
-
-        history=history_text,
-
-        emergency_instruction=emergency_instruction,
-
-        query=query
-    )
-
-    response = llm.invoke(
-        messages
-    )
-
-    return response.content
-
-
-# ============================================================
-# SYMPTOM → DOCTOR FLOW
-# ============================================================
-
-def handle_symptom_doctor_request(
-    query: str,
-    history_text: str
-):
-
-    combined_text = f"""
-Previous Conversation:
-
-{history_text}
-
-Current User Message:
-
-{query}
-"""
-
-    # --------------------------------------------------------
-    # DETECT SPECIALTY FROM SYMPTOMS
-    # --------------------------------------------------------
-
-    specialty = detect_specialty_from_symptoms(
-        combined_text
-    )
-
-    # --------------------------------------------------------
-    # IF SPECIALTY FOUND
-    # --------------------------------------------------------
-
-    if specialty:
-
-        city = extract_city(
-            combined_text
-        )
-
-        doctors = find_approved_doctors(
-            specialty=specialty,
-            city=city
-        )
-
-        response = ""
-
-        # Emergency warning
-        if detect_emergency(query):
-
-            response += (
-                "⚠️ **Important:** Your symptoms may "
-                "require urgent medical evaluation. "
-                "If the pain is severe, persistent, or "
-                "associated with difficulty breathing, "
-                "fainting, sweating, or other severe "
-                "symptoms, seek emergency medical care "
-                "immediately.\n\n"
+        emergency_response = (
+            build_emergency_response(
+                analysis,
+                specialty
             )
-
-        response += (
-            f"Based on the symptoms you described, "
-            f"the appropriate specialty to consider is "
-            f"**{specialty}**.\n\n"
+            + "\n\n"
         )
 
-        if doctors:
+    # --------------------------------------------------------
+    # If Gemini cannot determine specialty,
+    # do NOT guess.
+    # Let RAG answer the medical question.
+    # --------------------------------------------------------
 
-            response += generate_doctor_response(
-                doctors,
-                specialty=specialty,
-                city=city
-            )
+    if not specialty:
 
-        else:
+        return None
 
-            response += (
-                f"I could not find any approved "
-                f"**{specialty}** doctors"
-            )
+    # --------------------------------------------------------
+    # General medicine can be handled by RAG
+    # rather than searching for a specialist.
+    # --------------------------------------------------------
 
-            if city:
+    if specialty == "general_medicine":
 
-                response += (
-                    f" in **{city.title()}**"
+        if emergency:
+
+            return (
+                emergency_response
+                + handle_rag_request(
+                    query,
+                    history_text,
+                    analysis
                 )
-
-            response += (
-                " in our system.\n\n"
-                "You may try another city or consult "
-                "a healthcare professional directly."
             )
 
-        return response
-
-    return None
-
-
-# ============================================================
-# DIRECT DOCTOR REQUEST
-# ============================================================
-
-def handle_direct_doctor_request(
-    query: str,
-    history_text: str
-):
-
-    combined_text = f"""
-Previous Conversation:
-
-{history_text}
-
-Current User Message:
-
-{query}
-"""
+        return None
 
     # --------------------------------------------------------
-    # Extract filters from current + previous conversation
+    # If this is a symptom query but doctor is not needed,
+    # let RAG provide educational information.
     # --------------------------------------------------------
 
-    specialty = extract_specialty(
-        combined_text
+    if not doctor_needed:
+
+        if emergency:
+
+            return (
+                emergency_response
+                + handle_rag_request(
+                    query,
+                    history_text,
+                    analysis
+                )
+            )
+
+        return None
+
+    # --------------------------------------------------------
+    # Extract city
+    # --------------------------------------------------------
+
+    combined_text = (
+        history_text
+        + "\n"
+        + query
     )
 
     city = extract_city(
@@ -1178,7 +1047,7 @@ Current User Message:
     )
 
     # --------------------------------------------------------
-    # Search
+    # Find approved doctors
     # --------------------------------------------------------
 
     doctors = find_approved_doctors(
@@ -1186,52 +1055,99 @@ Current User Message:
         city=city
     )
 
-    return generate_doctor_response(
-        doctors,
+    # --------------------------------------------------------
+    # Base response
+    # --------------------------------------------------------
+
+    response = emergency_response
+
+    response += (
+        "Based on the symptoms you described, "
+        f"the appropriate specialty to consider is "
+        f"**{specialty}**.\n\n"
+    )
+
+    # --------------------------------------------------------
+    # No doctors
+    # --------------------------------------------------------
+
+    if not doctors:
+
+        response += (
+            "I could not find any approved doctors "
+            f"for **{specialty}**"
+        )
+
+        if city:
+
+            response += (
+                f" in **{city}**"
+            )
+
+        response += "."
+
+        return response
+
+    # --------------------------------------------------------
+    # Doctor response
+    # --------------------------------------------------------
+
+    doctor_response = generate_doctor_response(
+        doctors=doctors,
         specialty=specialty,
         city=city
     )
 
+    response += doctor_response
+
+    return response
+
 
 # ============================================================
-# MAIN ASSISTANT
+# DIRECT DOCTOR REQUEST
+#
+# Gemini analysis is used first.
+# Existing aliases remain as fallback.
 # ============================================================
 
-def ask_medical_assistant(
-    query: str,
-    history
+def handle_doctor_request(
+    query,
+    history_text,
+    analysis
 ):
-
-    history_text = format_history(
-        history
-    )
 
     query_lower = query.lower().strip()
 
-    # ========================================================
-    # 1. SYMPTOM → SPECIALTY → DOCTOR
-    # ========================================================
+    # --------------------------------------------------------
+    # LLM decision
+    # --------------------------------------------------------
 
-    symptom_response = handle_symptom_doctor_request(
-        query,
-        history_text
+    direct_doctor = analysis.get(
+        "direct_doctor_request",
+        False
     )
 
-    if symptom_response:
+    # --------------------------------------------------------
+    # Existing fallback
+    # --------------------------------------------------------
 
-        return symptom_response
+    if not direct_doctor:
 
-    # ========================================================
-    # 2. DIRECT DOCTOR QUERY
-    # ========================================================
+        direct_doctor = is_direct_doctor_query(
+            query
+        )
 
-    direct_doctor = is_direct_doctor_query(
-        query
-    )
+    # --------------------------------------------------------
+    # Previous doctor conversation
+    # --------------------------------------------------------
 
     doctor_context = is_doctor_context(
         history_text
     )
+
+    # --------------------------------------------------------
+    # Current specialty/city
+    # --------------------------------------------------------
 
     current_specialty = extract_specialty(
         query
@@ -1241,16 +1157,7 @@ def ask_medical_assistant(
         query
     )
 
-    # Follow-up like:
-    #
-    # User: Give me all approved doctors
-    # User: Lahore
-    #
-    # or:
-    #
-    # User: Lahore
-    # User: ENT
-
+  
     follow_up_doctor_request = (
 
         doctor_context
@@ -1265,52 +1172,374 @@ def ask_medical_assistant(
         )
     )
 
-    if direct_doctor or follow_up_doctor_request:
+  
+    # Not a doctor request
+    
 
-        return handle_direct_doctor_request(
-            query,
-            history_text
-        )
+    if not direct_doctor and not follow_up_doctor_request:
 
-    # ========================================================
-    # 3. NORMAL MEDICAL QUESTION → RAG
-    # ========================================================
+        return None
 
-    return generate_medical_response(
-        query,
+  
+    # Combine conversation
+    
+
+    combined_text = (
         history_text
+        + "\n"
+        + query
     )
 
 
-# ============================================================
-# HEALTH CHECK
-# ============================================================
 
-@app.get("/")
-def root():
+    specialty = extract_specialty(
+        query
+    )
 
-    return {
-        "message": "AI Medical Assistant API is running",
-        "status": "success"
-    }
+    if not specialty:
+
+        specialty = analysis.get(
+            "specialty",
+            ""
+        )
+
+    if not specialty:
+
+        specialty = extract_specialty(
+            combined_text
+        )
+
+   
+    # City
+   
+
+    city = extract_city(
+        combined_text
+    )
 
 
-# ============================================================
-# CHAT ENDPOINT
-# ============================================================
+    # If specialty is general medicine,
+    # do not use it as a specialist MongoDB filter.
+   
+
+    if specialty == "general_medicine":
+
+        specialty = ""
+
+  
+    # Search MongoDB
+   
+
+    doctors = find_approved_doctors(
+        specialty=specialty,
+        city=city
+    )
+
+ 
+    # Return doctor response
+  
+
+    return generate_doctor_response(
+        doctors=doctors,
+        specialty=specialty,
+        city=city
+    )
+
+
+
+def handle_rag_request(
+    query,
+    history_text,
+    analysis
+):
+
+  
+    # Retrieve medical context
+    
+
+    results = retrieve_medical_context(
+        query,
+        limit=5
+    )
+
+  
+    # Check whether context is actually relevant
+    
+
+    rag_context_available = (
+        has_relevant_rag_context(
+            results
+        )
+    )
+
+    # Format context
+
+    medical_context = format_medical_context(
+        results
+    )
+
+    
+    # Emergency instruction
+   
+
+    emergency_instruction = ""
+
+    if analysis.get(
+        "emergency",
+        False
+    ):
+
+        emergency_reason = analysis.get(
+            "emergency_reason",
+            ""
+        )
+
+        emergency_instruction = f"""
+IMPORTANT EMERGENCY INSTRUCTION:
+
+The medical-intelligence layer has identified
+that the user's situation may require urgent
+medical attention.
+
+Emergency reason:
+
+{emergency_reason}
+
+Clearly advise the user to seek immediate
+medical attention or contact their local
+emergency service.
+
+Do not delay urgent care.
+
+Do not diagnose the user.
+"""
+
+    
+    # RAG / GENERAL KNOWLEDGE instruction
+  
+
+    if rag_context_available:
+
+        knowledge_instruction = """
+The retrieved medical context appears relevant
+to the user's question.
+
+Use it as the primary source for the answer.
+
+You may use your general medical knowledge only
+to explain or clarify the provided information.
+
+Do not contradict the provided context.
+Do not claim that general knowledge came from
+the retrieved sources.
+"""
+
+    else:
+
+        knowledge_instruction = """
+The retrieved medical context is missing,
+insufficient, or not sufficiently relevant
+to the user's question.
+
+In this situation, answer using your general
+medical knowledge.
+
+Be transparent that the answer is based on
+general medical knowledge rather than the
+retrieved medical context.
+
+Do NOT say that the context contains information
+when it does not.
+
+Do NOT invent citations or sources.
+"""
+
+  
+    # RAG prompt
+   
+    prompt = ChatPromptTemplate.from_messages(
+        [
+
+            (
+                "system",
+                """
+You are a helpful AI medical assistant.
+
+Your role is to provide general educational
+medical information.
+
+You are NOT a doctor and must NOT diagnose
+the user.
+
+IMPORTANT SAFETY RULES:
+
+1. Do not diagnose the user.
+2. Do not claim certainty about a medical condition.
+3. Explain possible causes or possibilities carefully.
+4. Provide useful general educational information.
+5. Encourage professional medical consultation
+   when appropriate.
+6. If the situation appears urgent or dangerous,
+   recommend immediate medical attention.
+7. Do not invent medical facts.
+8. Do not invent sources.
+9. Respond in the same language/style as the user
+   when reasonably possible.
+10. Understand English, Urdu, Roman Urdu and
+    mixed language.
+
+KNOWLEDGE SOURCE RULE:
+
+{knowledge_instruction}
+
+{emergency_instruction}
+"""
+            ),
+
+            (
+                "human",
+                """
+Retrieved Medical Context:
+
+{medical_context}
+
+Previous Conversation:
+
+{history_text}
+
+Medical Intelligence Analysis:
+
+{analysis}
+
+User Question:
+
+{query}
+
+Provide the best helpful educational answer.
+"""
+            )
+
+        ]
+    )
+
+   
+    # Run Gemini
+  
+
+    chain = prompt | llm
+
+    response = chain.invoke(
+        {
+            "medical_context": medical_context,
+
+            "history_text": history_text,
+
+            "analysis": json.dumps(
+                analysis,
+                ensure_ascii=False
+            ),
+
+            "query": query,
+
+            "knowledge_instruction":
+                knowledge_instruction,
+
+            "emergency_instruction":
+                emergency_instruction,
+        }
+    )
+
+    return response.content
+
+
+
+
+def ask_medical_assistant(
+    query,
+    history
+):
+
+    # Format history
+   
+
+    history_text = format_history(
+        history
+    )
+
+    
+    # STEP 1
+    # LLM analyzes user message
+   
+
+    analysis = analyze_medical_query(
+        query=query,
+        history_text=history_text
+    )
+
+    print(
+        "Medical Analysis:",
+        json.dumps(
+            analysis,
+            indent=2,
+            ensure_ascii=False
+        )
+    )
+
+  
+    # STEP 2
+    # EMERGENCY + SYMPTOM HANDLING
+   
+
+    response = handle_symptom_request(
+        query=query,
+        history_text=history_text,
+        analysis=analysis
+    )
+
+    if response:
+
+        return response
+
+  
+    # STEP 3
+    # DIRECT DOCTOR / DOCTOR FOLLOW-UP
+    
+
+    response = handle_doctor_request(
+        query=query,
+        history_text=history_text,
+        analysis=analysis
+    )
+
+    if response:
+
+        return response
+
+    
+
+    return handle_rag_request(
+        query=query,
+        history_text=history_text,
+        analysis=analysis
+    )
+
+
+
+# CHAT API
+
 
 @app.post("/api/chat")
 def chat(request: QueryRequest):
 
-    query = request.query.strip()
-
-    if not query:
-
-        return {
-            "response": "Please enter a question."
-        }
-
     try:
+
+        query = request.query.strip()
+
+        if not query:
+
+            return {
+                "response": "Please enter a question."
+            }
 
         response = ask_medical_assistant(
             query,
@@ -1324,13 +1553,25 @@ def chat(request: QueryRequest):
     except Exception as error:
 
         print(
-            "CHAT ERROR:",
-            str(error)
+            "Chat Error:",
+            error
         )
 
         return {
-            "response": (
-                "Sorry, I encountered an error "
-                "while processing your request."
-            )
+            "response":
+                "Sorry, something went wrong. "
+                "Please try again."
         }
+
+
+
+# ROOT
+
+
+@app.get("/")
+def root():
+
+    return {
+        "message":
+            "Medical Assistant API is running."
+    }
