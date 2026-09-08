@@ -46,7 +46,7 @@ app.add_middleware(
 
 client = MongoClient(MONGODB_URI)
 
-db = client["medical_assistant"]
+db = client["test"]
 
 medical_chunks_collection = db["medical_chunks"]
 doctors_collection = db["doctors"]
@@ -203,11 +203,7 @@ def format_history(history):
     return "\n".join(formatted)
 
 
-# ============================================================
-# CITY EXTRACTION
-#
-# Used for MongoDB doctor search.
-# ============================================================
+
 
 def extract_city(text):
 
@@ -223,12 +219,6 @@ def extract_city(text):
 
     return ""
 
-
-# ============================================================
-# SPECIALTY EXTRACTION
-#
-# Used mainly for direct doctor requests.
-# ============================================================
 
 def extract_specialty(text):
 
@@ -408,7 +398,7 @@ Return JSON only.
 
         content = response.content.strip()
 
-        # Remove markdown code fences if Gemini adds them
+      
         content = re.sub(
             r"^```json\s*",
             "",
@@ -452,11 +442,6 @@ Return JSON only.
         }
 
 
-# ============================================================
-# DOCTOR QUERY DETECTION
-#
-# Kept as fallback for direct doctor requests.
-# ============================================================
 
 def is_direct_doctor_query(query):
 
@@ -487,9 +472,9 @@ def is_direct_doctor_query(query):
     return False
 
 
-# ============================================================
+
 # DOCTOR CONTEXT
-# ============================================================
+
 
 def is_doctor_context(history_text):
 
@@ -525,11 +510,6 @@ def is_doctor_context(history_text):
     return False
 
 
-# ============================================================
-# APPROVED DOCTORS SEARCH
-#
-# SAME MONGODB LOGIC
-# ============================================================
 
 def find_approved_doctors(
     specialty="",
@@ -540,9 +520,7 @@ def find_approved_doctors(
         "approveStatus": "approved"
     }
 
-    # --------------------------------------------------------
-    # Specialty filter
-    # --------------------------------------------------------
+
 
     if specialty:
 
@@ -551,9 +529,7 @@ def find_approved_doctors(
             "$options": "i"
         }
 
-    # --------------------------------------------------------
-    # City filter
-    # --------------------------------------------------------
+
 
     if city:
 
@@ -660,11 +636,6 @@ def find_approved_doctors(
     return result
 
 
-# ============================================================
-# DOCTOR RESPONSE GENERATOR
-#
-# SAME DOCTOR RESPONSE LOGIC
-# ============================================================
 
 def generate_doctor_response(
     doctors,
@@ -866,22 +837,14 @@ Relevance Score: {score}
     )
 
 
-# ============================================================
-# RAG RELEVANCE CHECK
-#
-# This prevents unrelated chunks from being treated
-# as relevant context.
-# ============================================================
+
 
 def has_relevant_rag_context(results):
 
     if not results:
         return False
 
-    # MongoDB vector search score threshold.
-    #
-    # This is intentionally moderate.
-    # You can tune it later according to your dataset.
+  
     MIN_RELEVANCE_SCORE = 0.55
 
     for result in results:
@@ -902,9 +865,6 @@ def has_relevant_rag_context(results):
     return False
 
 
-# ============================================================
-# EMERGENCY RESPONSE
-# ============================================================
 
 def build_emergency_response(
     analysis,
@@ -966,9 +926,7 @@ def handle_symptom_request(
         False
     )
 
-    # --------------------------------------------------------
-    # Emergency first
-    # --------------------------------------------------------
+
 
     emergency_response = ""
 
@@ -982,20 +940,12 @@ def handle_symptom_request(
             + "\n\n"
         )
 
-    # --------------------------------------------------------
-    # If Gemini cannot determine specialty,
-    # do NOT guess.
-    # Let RAG answer the medical question.
-    # --------------------------------------------------------
 
     if not specialty:
 
         return None
 
-    # --------------------------------------------------------
-    # General medicine can be handled by RAG
-    # rather than searching for a specialist.
-    # --------------------------------------------------------
+
 
     if specialty == "general_medicine":
 
@@ -1012,10 +962,7 @@ def handle_symptom_request(
 
         return None
 
-    # --------------------------------------------------------
-    # If this is a symptom query but doctor is not needed,
-    # let RAG provide educational information.
-    # --------------------------------------------------------
+
 
     if not doctor_needed:
 
@@ -1032,9 +979,7 @@ def handle_symptom_request(
 
         return None
 
-    # --------------------------------------------------------
-    # Extract city
-    # --------------------------------------------------------
+    
 
     combined_text = (
         history_text
@@ -1046,18 +991,11 @@ def handle_symptom_request(
         combined_text
     )
 
-    # --------------------------------------------------------
-    # Find approved doctors
-    # --------------------------------------------------------
-
     doctors = find_approved_doctors(
         specialty=specialty,
         city=city
     )
 
-    # --------------------------------------------------------
-    # Base response
-    # --------------------------------------------------------
 
     response = emergency_response
 
@@ -1067,9 +1005,6 @@ def handle_symptom_request(
         f"**{specialty}**.\n\n"
     )
 
-    # --------------------------------------------------------
-    # No doctors
-    # --------------------------------------------------------
 
     if not doctors:
 
@@ -1088,9 +1023,6 @@ def handle_symptom_request(
 
         return response
 
-    # --------------------------------------------------------
-    # Doctor response
-    # --------------------------------------------------------
 
     doctor_response = generate_doctor_response(
         doctors=doctors,
@@ -1103,12 +1035,6 @@ def handle_symptom_request(
     return response
 
 
-# ============================================================
-# DIRECT DOCTOR REQUEST
-#
-# Gemini analysis is used first.
-# Existing aliases remain as fallback.
-# ============================================================
 
 def handle_doctor_request(
     query,
@@ -1118,18 +1044,12 @@ def handle_doctor_request(
 
     query_lower = query.lower().strip()
 
-    # --------------------------------------------------------
-    # LLM decision
-    # --------------------------------------------------------
+  
 
     direct_doctor = analysis.get(
         "direct_doctor_request",
         False
     )
-
-    # --------------------------------------------------------
-    # Existing fallback
-    # --------------------------------------------------------
 
     if not direct_doctor:
 
@@ -1137,17 +1057,13 @@ def handle_doctor_request(
             query
         )
 
-    # --------------------------------------------------------
-    # Previous doctor conversation
-    # --------------------------------------------------------
+
 
     doctor_context = is_doctor_context(
         history_text
     )
 
-    # --------------------------------------------------------
-    # Current specialty/city
-    # --------------------------------------------------------
+
 
     current_specialty = extract_specialty(
         query
@@ -1218,8 +1134,7 @@ def handle_doctor_request(
     )
 
 
-    # If specialty is general medicine,
-    # do not use it as a specialist MongoDB filter.
+   
    
 
     if specialty == "general_medicine":
@@ -1459,7 +1374,6 @@ def ask_medical_assistant(
     history
 ):
 
-    # Format history
    
 
     history_text = format_history(
@@ -1467,8 +1381,7 @@ def ask_medical_assistant(
     )
 
     
-    # STEP 1
-    # LLM analyzes user message
+   
    
 
     analysis = analyze_medical_query(
@@ -1486,8 +1399,7 @@ def ask_medical_assistant(
     )
 
   
-    # STEP 2
-    # EMERGENCY + SYMPTOM HANDLING
+   
    
 
     response = handle_symptom_request(
@@ -1501,8 +1413,7 @@ def ask_medical_assistant(
         return response
 
   
-    # STEP 3
-    # DIRECT DOCTOR / DOCTOR FOLLOW-UP
+   
     
 
     response = handle_doctor_request(
