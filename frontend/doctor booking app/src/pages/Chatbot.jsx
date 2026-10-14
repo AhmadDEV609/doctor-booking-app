@@ -131,7 +131,7 @@ const Chatbot = () => {
             const history = messages.map((msg) => ({ role: msg.sender === "user" ? "user" : "assistant", content: msg.text, }));
 
             const response = await fetch(
-                "https://doctor-booking-app-chatbot-backend-b9n01o8bp-ahmad-s-projects20.vercel.app/api/chat",
+                "https://doctor-booking-app-chatbot-backend-vstavqjvo-ahmad-s-projects20.vercel.app/api/chat",
                 {
                     method: "POST",
                     headers: {
