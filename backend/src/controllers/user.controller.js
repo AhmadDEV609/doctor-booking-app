@@ -175,9 +175,17 @@ const userimageUpdate = asyncHandler(async (req, res, next) => {
 
 const logout = asyncHandler(async (req, res) => {
 
-    res.clearCookie("accessToken");
+    res.clearCookie("accessToken", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+    });
 
-    res.clearCookie("refreshToken");
+    res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "none",
+    });
 
     await User.findByIdAndUpdate(req.user.id, {
         refreshToken: ""
