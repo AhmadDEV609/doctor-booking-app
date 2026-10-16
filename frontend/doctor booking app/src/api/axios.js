@@ -1,3 +1,4 @@
+
 import axios from "axios";
 
 const baseURL = import.meta.env.VITE_API_URL;
@@ -50,8 +51,11 @@ api.interceptors.response.use(
 
             return api(originalRequest);
         } catch (refreshError) {
-            if (window.location.pathname !== "/login") {
-                window.location.replace("/login");
+
+            if (typeof window !== "undefined") {
+                window.dispatchEvent(
+                    new Event("auth:session-expired")
+                );
             }
 
             return Promise.reject(refreshError);

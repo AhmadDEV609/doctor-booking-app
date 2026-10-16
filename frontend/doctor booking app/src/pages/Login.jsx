@@ -33,35 +33,41 @@ const Login = () => {
         }));
     }
 
+
     const handleSubmit = async (e) => {
         e.preventDefault();
 
         try {
             const res = await login(form);
 
+            setUser(res.user);
 
-            alert('login successfully')
             setForm({
-                email: '',
-                password: ''
-            })
+                email: "",
+                password: "",
+            });
 
-            setUser(res.user)
-
-            if (res.role === 'patient') {
-                navigate('/Patient')
-            }
-            if (res.role === 'admin') {
-                navigate('/Admin')
-            }
-            if (res.role === 'doctor') {
-                navigate('/Doctor')
+            if (res.user.role === "patient") {
+                navigate("/patient", { replace: true });
+            } else if (res.user.role === "admin") {
+                navigate("/admin", { replace: true });
+            } else if (res.user.role === "doctor") {
+                navigate("/doctor", { replace: true });
+            } else {
+                navigate("/", { replace: true });
             }
         } catch (err) {
-            console.log(err.response?.data || err.message);
-            alert(err.response?.data?.message || "Login failed");
+            console.error(
+                "Login failed:",
+                err.response?.data || err.message
+            );
+
+            alert(
+                err.response?.data?.message || "Login failed"
+            );
         }
     };
+
     return (
 
         <section className="min-h-screen bg-linear-to-br from-cyan-50 via-white to-emerald-50 flex items-center justify-center px-5 py-10">
