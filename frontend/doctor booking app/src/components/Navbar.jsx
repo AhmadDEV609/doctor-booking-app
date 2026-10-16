@@ -125,12 +125,6 @@ const Navbar = () => {
             return [
 
                 {
-                    name: "Home",
-                    to: "/",
-                    icon: Home,
-                },
-
-                {
                     name: "Doctors",
                     to: "/doctors",
                     icon: Stethoscope,
