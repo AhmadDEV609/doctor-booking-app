@@ -229,7 +229,7 @@ const Navbar = () => {
 
                             <h2 className="font-bold text-xl text-slate-800">
 
-                                CareSync AI
+                                MediConnect AI
 
                             </h2>
 

@@ -56,7 +56,7 @@ const appointmentSchema = new mongoose.Schema(
 appointmentSchema.index(
     {
         doctorId: 1,
-        day: 1,
+        date: 1,
         startTime: 1,
         endTime: 1,
     },
